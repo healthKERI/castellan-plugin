@@ -41,8 +41,9 @@ class WhisperPlugin(
     def plugin_id(self) -> str:
         return "whisper"
 
-    def initialize(self, app: "LocksmithApplication") -> None:
+    def initialize(self, app: "LocksmithApplication", parent) -> None:
         self._app = app
+        self.parent = parent
         self._db: WhisperBaser | None = None
         self._pages: dict[str, QWidget] = {}
         self._build_pages(app)
@@ -52,11 +53,15 @@ class WhisperPlugin(
         """Instantiate all Whisper page widgets."""
         from .credentials.issued.list import IssuedCredentialsListPage
         from .credentials.received.list import ReceivedCredentialsListPage
+        from .issuer.setup import IssuerSetupPage
+        from .issuer.list import RegistryListPage
 
         self._pages = {
-            "whisper_issued_credentials": IssuedCredentialsListPage(app, None),
-            "whisper_received_credentials": ReceivedCredentialsListPage(app, None),
-            "whisper_placeholder": WhisperPlaceholderPage("Whisper", None),
+            "whisper_issued_credentials": IssuedCredentialsListPage(app, self.parent),
+            "whisper_received_credentials": ReceivedCredentialsListPage(app, self.parent),
+            "whisper_placeholder": WhisperPlaceholderPage("Whisper", self.parent),
+            "whisper_issuer_setup": IssuerSetupPage(app, self.parent),
+            "whisper_registries": RegistryListPage(app, self.parent),
         }
 
     def _navigate(self, page_key: str) -> None:
@@ -94,6 +99,8 @@ class WhisperPlugin(
         items.append(MenuSpacer(15))
 
         nav_buttons_config = [
+            (":/assets/material-icons/passport.svg", "Initialization", "whisper_issuer_setup"),
+            (":/assets/material-icons/badge.svg", "Registries", "whisper_registries"),
             (":/assets/material-icons/out-badge.svg", "Issued Credentials", "whisper_issued_credentials"),
             (":/assets/material-icons/in-badge.svg", "Received Credentials", "whisper_received_credentials"),
         ]

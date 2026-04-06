@@ -313,3 +313,182 @@ async def delete_received_credential(
     except Exception as e:
         logger.error(f"Error deleting received credential: {e}")
         return {'success': False, 'error': str(e)}
+
+
+# ---------------------------------------------------------------------------
+# TEL registrar
+# ---------------------------------------------------------------------------
+
+async def post_tel_event(
+    app: "LocksmithApplication",
+    raw_event: bytes,
+) -> Dict[str, Any]:
+    """
+    POST a raw CESR-encoded TEL event to weirwood /registrar/tel-events.
+
+    Returns dict with 'success' bool and, on success, 'data' containing the
+    serialised TelEvent (including weirwood's 'receipt' cigar signature).
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        response = await essr.request(
+            path="/registrar/tel-events",
+            method="POST",
+            content=raw_event,
+            headers={"Content-Type": "application/cesr"},
+            timeout=30,
+        )
+        if response is not None and response.status_code in (200, 201):
+            return {'success': True, 'data': response.json()}
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}",
+            }
+    except Exception as e:
+        logger.error(f"Error posting TEL event: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def fetch_tel_events(
+    app: "LocksmithApplication",
+    regk: str,
+    vcid: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    GET TEL events for a registry prefix, optionally filtered to a credential SAID.
+
+    Returns dict with 'success' bool and, on success, 'events' list.
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        path = f"/registrar/tel-events/{urllib.parse.quote(regk, safe='')}"
+        if vcid:
+            path += f"/{urllib.parse.quote(vcid, safe='')}"
+        response = await essr.request(path=path, method="GET")
+        if response is not None and response.status_code == 200:
+            data = response.json()
+            data['success'] = True
+            return data
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}",
+            }
+    except Exception as e:
+        logger.error(f"Error fetching TEL events: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Intra-enterprise mailbox
+# ---------------------------------------------------------------------------
+
+async def post_message(
+    app: "LocksmithApplication",
+    recipient_aid: str,
+    topic: str,
+    raw: bytes,
+) -> Dict[str, Any]:
+    """
+    POST a CESR-encoded message to weirwood /messages for a recipient AID.
+
+    Returns dict with 'success' bool and, on success, the stored Message doc.
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        params = (
+            f"recipient={urllib.parse.quote(recipient_aid, safe='')}"
+            f"&topic={urllib.parse.quote(topic, safe='')}"
+        )
+        response = await essr.request(
+            path=f"/messages?{params}",
+            method="POST",
+            content=raw,
+            headers={"Content-Type": "application/cesr"},
+            timeout=30,
+        )
+        if response is not None and response.status_code in (200, 201):
+            return {'success': True, 'data': response.json()}
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}",
+            }
+    except Exception as e:
+        logger.error(f"Error posting message: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def fetch_messages(
+    app: "LocksmithApplication",
+    topic: Optional[str] = None,
+    unread_only: bool = True,
+    page: int = 0,
+    page_size: int = 50,
+) -> Dict[str, Any]:
+    """
+    GET messages from weirwood /messages for the authenticated AID.
+
+    Returns dict with 'success' bool and, on success, 'messages' list.
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        params = [f"page={page}", f"page_size={page_size}"]
+        if topic:
+            params.append(f"topic={urllib.parse.quote(topic, safe='')}")
+        if unread_only:
+            params.append("unread=true")
+        path = f"/messages?{'&'.join(params)}"
+        response = await essr.request(path=path, method="GET")
+        if response is not None and response.status_code == 200:
+            data = response.json()
+            data['success'] = True
+            return data
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}",
+            }
+    except Exception as e:
+        logger.error(f"Error fetching messages: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def mark_message_read(
+    app: "LocksmithApplication",
+    message_id: str,
+) -> Dict[str, Any]:
+    """Mark a weirwood mailbox message as read."""
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        response = await essr.request(
+            path=f"/messages/{urllib.parse.quote(message_id, safe='')}",
+            method="PUT",
+            json={},
+        )
+        if response is not None and response.status_code == 200:
+            return {'success': True}
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}",
+            }
+    except Exception as e:
+        logger.error(f"Error marking message read: {e}")
+        return {'success': False, 'error': str(e)}
