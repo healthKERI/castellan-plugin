@@ -37,6 +37,21 @@ class WhisperAccount:
 
 
 @dataclass
+class WhisperInitState:
+    """
+    Track multi-step initialization progress for the whisper setup flow.
+
+    Persisted across restarts so the user resumes at the correct section
+    of WhisperSetupPage rather than starting over.
+    """
+    init_step: int = 1                      # 1=choose identifier, 2=wait, 3=group, 4=progress
+    chosen_identifier_alias: str = ""       # local hab alias selected in step 1
+    identifier_uploaded: bool = False       # whether POST /identifiers succeeded
+    group_identifier_alias: str = ""        # group hab alias created in step 3
+    init_complete: bool = False             # True once registry is confirmed
+
+
+@dataclass
 class WhisperTeam:
     """
     Track Whisper team information.
@@ -71,6 +86,7 @@ class WhisperBaser(dbing.LMDBer):
     def __init__(self, name="whisper", headDirPath=None, reopen=True, **kwa):
         self.whisperAccounts = None
         self.whisperTeams = None
+        self.whisperInitState = None
 
         super(WhisperBaser, self).__init__(name=name, headDirPath=headDirPath, reopen=reopen, **kwa)
 
@@ -91,6 +107,14 @@ class WhisperBaser(dbing.LMDBer):
             schema=WhisperTeam,
             seperator='>'
         )
+
+        self.whisperInitState = koming.Komer(
+            db=self,
+            subkey='initState.',
+            schema=WhisperInitState,
+            seperator='>'
+        )
+
         return self.env
 
 

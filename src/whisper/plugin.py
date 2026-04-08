@@ -53,15 +53,15 @@ class WhisperPlugin(
         """Instantiate all Whisper page widgets."""
         from .credentials.issued.list import IssuedCredentialsListPage
         from .credentials.received.list import ReceivedCredentialsListPage
-        from .issuer.setup import IssuerSetupPage
-        from .issuer.list import RegistryListPage
+        from .init.setup import WhisperSetupPage
+        from .settings import WhisperSettingsPage
 
         self._pages = {
             "whisper_issued_credentials": IssuedCredentialsListPage(app, self.parent),
             "whisper_received_credentials": ReceivedCredentialsListPage(app, self.parent),
             "whisper_placeholder": WhisperPlaceholderPage("Whisper", self.parent),
-            "whisper_issuer_setup": IssuerSetupPage(app, self.parent),
-            "whisper_registries": RegistryListPage(app, self.parent),
+            "whisper_setup": WhisperSetupPage(app, self.parent),
+            "whisper_settings": WhisperSettingsPage(app, self.parent),
         }
 
     def _navigate(self, page_key: str) -> None:
@@ -99,8 +99,8 @@ class WhisperPlugin(
         items.append(MenuSpacer(15))
 
         nav_buttons_config = [
-            (":/assets/material-icons/passport.svg", "Initialization", "whisper_issuer_setup"),
-            (":/assets/material-icons/badge.svg", "Registries", "whisper_registries"),
+            (":/assets/material-icons/passport.svg", "Initialization", "whisper_setup"),
+            (":/assets/material-icons/settings.svg", "Settings", "whisper_settings"),
             (":/assets/material-icons/out-badge.svg", "Issued Credentials", "whisper_issued_credentials"),
             (":/assets/material-icons/in-badge.svg", "Received Credentials", "whisper_received_credentials"),
         ]
@@ -190,10 +190,19 @@ class WhisperPlugin(
             "db": self._db,
         }
 
-        # Listen for healthKERI account creation so whisper state stays current
-        # without requiring a vault lock/unlock cycle.
         if hasattr(vault, 'signals') and vault.signals:
+            # Listen for healthKERI account creation so whisper state stays current.
             vault.signals.doer_event.connect(self._on_vault_doer_event)
+            # Intercept multisig notifications delivered via WeirwoodMessagePoller.
+            if hasattr(vault.signals, 'new_notification'):
+                vault.signals.new_notification.connect(self._on_new_notification)
+
+        # Register background doers for weirwood polling.
+        from .init.poller import UploadedIdentifierPoller
+        from .init.doers import WeirwoodMessagePoller
+        self._identifier_poller = UploadedIdentifierPoller(self._app)
+        self._message_poller = WeirwoodMessagePoller(self._app)
+        vault.extend([self._identifier_poller, self._message_poller])
 
     def on_vault_closed(self, vault: "Vault") -> None:
         if hasattr(vault, 'signals') and vault.signals:
@@ -201,10 +210,44 @@ class WhisperPlugin(
                 vault.signals.doer_event.disconnect(self._on_vault_doer_event)
             except (RuntimeError, TypeError):
                 pass
+            if hasattr(vault.signals, 'new_notification'):
+                try:
+                    vault.signals.new_notification.disconnect(self._on_new_notification)
+                except (RuntimeError, TypeError):
+                    pass
         vault.plugin_state.pop("whisper", None)
         if self._db:
             self._db.close()
             self._db = None
+
+    def _on_new_notification(self, notification) -> None:
+        """Intercept vault notifications and open the appropriate whisper dialog."""
+        try:
+            route = notification.attrs.get("r", "") if hasattr(notification, "attrs") else ""
+            said = notification.attrs.get("d", "") if hasattr(notification, "attrs") else ""
+            if not said:
+                return
+            vault_page = self._get_vault_page()
+            if vault_page is None:
+                return
+            if "/multisig/icp" in route:
+                from .init.accept_group import AcceptGroupProposalDialog
+                dialog = AcceptGroupProposalDialog(
+                    app=self._app,
+                    parent=vault_page,
+                    proposal_said=said,
+                )
+                dialog.open()
+            elif "/multisig/vcp" in route:
+                from .init.accept_registry import AcceptRegistryProposalDialog
+                dialog = AcceptRegistryProposalDialog(
+                    app=self._app,
+                    parent=vault_page,
+                    proposal_said=said,
+                )
+                dialog.open()
+        except Exception:
+            logger.exception("Error handling new notification in WhisperPlugin")
 
     def _on_vault_doer_event(self, doer_name: str, event_type: str, data: dict) -> None:
         """Handle vault-level doer events relevant to the whisper plugin."""
@@ -227,15 +270,17 @@ class WhisperPlugin(
     # -------------------------------------------------------------------------
 
     def is_setup_complete(self, vault: "Vault") -> bool:
-        state = vault.plugin_state.get("whisper", {})
-        return state.get("account") is not None and state.get("team") is not None
+        db: WhisperBaser | None = vault.plugin_state.get("whisper", {}).get("db")
+        if db is None or db.whisperInitState is None:
+            return False
+        init_state = db.whisperInitState.get(keys=("init",))
+        return init_state is not None and init_state.init_complete
 
     def get_setup_page(self, vault: "Vault") -> tuple[str, bool]:
-        state = vault.plugin_state.get("whisper", {})
         if self.is_setup_complete(vault):
             return ("whisper_issued_credentials", True)
         else:
-            return ("whisper_placeholder", False)
+            return ("whisper_setup", False)
 
 
     # -------------------------------------------------------------------------

@@ -26,6 +26,74 @@ def _get_essr(app: "LocksmithApplication"):
 
 
 # ---------------------------------------------------------------------------
+# Uploaded identifiers
+# ---------------------------------------------------------------------------
+
+async def upload_identifier(
+    app: "LocksmithApplication",
+    aid: str,
+    alias: str,
+    oobi: str = "",
+) -> Dict[str, Any]:
+    """
+    Upload a whisper identifier to weirwood POST /identifiers.
+
+    Returns dict with 'success' bool and, on success, the stored identifier doc.
+    Returns 'conflict': True when weirwood returns 409 (alias already taken).
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        response = await essr.request(
+            path="/identifiers",
+            method="POST",
+            json={"aid": aid, "alias": alias, "oobi": oobi},
+            timeout=30,
+        )
+        if response is not None and response.status_code in (200, 201):
+            return {'success': True, 'data': response.json()}
+        elif response is not None and response.status_code == 409:
+            return {'success': False, 'conflict': True, 'error': 'Alias already uploaded to weirwood'}
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}",
+            }
+    except Exception as e:
+        logger.error(f"Error uploading identifier: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def fetch_identifiers(app: "LocksmithApplication") -> Dict[str, Any]:
+    """
+    GET all uploaded identifiers from weirwood /identifiers.
+
+    Returns dict with 'success' bool and, on success, 'identifiers' list of
+    {aid, alias, oobi, created_at} dicts.
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        response = await essr.request(path="/identifiers", method="GET")
+        if response is not None and response.status_code == 200:
+            data = response.json()
+            data['success'] = True
+            return data
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}",
+            }
+    except Exception as e:
+        logger.error(f"Error fetching identifiers: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+# ---------------------------------------------------------------------------
 # Issued credentials
 # ---------------------------------------------------------------------------
 
