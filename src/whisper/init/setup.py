@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from locksmith.ui import colors
 from locksmith.ui.toolkit.widgets.buttons import (
-    LocksmithButton, LocksmithInvertedButton,
+    LocksmithButton,
 )
 from locksmith.ui.toolkit.widgets.fields import (
     FloatingLabelComboBox, FloatingLabelLineEdit, LocksmithLineEdit,
@@ -150,7 +150,7 @@ class WhisperSetupPage(LocksmithFormPage):
         s1_in.addWidget(self._id_dropdown)
         s1_in.addSpacing(12)
         self._upload_button = LocksmithButton("Upload to Weirwood")
-        self._upload_button.setFixedWidth(180)
+        self._upload_button.setFixedWidth(200)
         self._upload_button.clicked.connect(self._on_upload_clicked)
         s1_in.addWidget(self._upload_button)
         s1_in.addStretch()
@@ -185,12 +185,21 @@ class WhisperSetupPage(LocksmithFormPage):
     # -- Section 2: Wait for Peers --------------------------------------
 
     def _build_section2(self, layout: QVBoxLayout):
-        self._add_section_header(
-            layout,
-            "Waiting for Peers",
-            "Your identifier has been uploaded. Waiting for at least one peer to "
-            "join before group identifier creation can begin.",
+        self._s2_header_lbl = QLabel("Waiting for Peers")
+        self._s2_header_lbl.setStyleSheet(
+            f"font-weight: bold; font-size: 20px; color: {colors.TEXT_MENU};"
         )
+        layout.addWidget(self._s2_header_lbl)
+        layout.addSpacing(6)
+        self._s2_subtext_lbl = QLabel(
+            "Your identifier has been uploaded. Waiting for at least one peer to "
+            "join before group identifier creation can begin."
+        )
+        self._s2_subtext_lbl.setWordWrap(True)
+        self._s2_subtext_lbl.setStyleSheet(
+            f"font-size: 13px; color: {colors.TEXT_SUBTLE}; font-weight: 200;"
+        )
+        layout.addWidget(self._s2_subtext_lbl)
         layout.addSpacing(12)
 
         self._peer_count_label = QLabel("0 peer(s) have joined weirwood")
@@ -198,13 +207,6 @@ class WhisperSetupPage(LocksmithFormPage):
             f"font-size: 14px; color: {colors.TEXT_SUBTLE};"
         )
         layout.addWidget(self._peer_count_label)
-        layout.addSpacing(20)
-
-        self._continue_button = LocksmithButton("Continue to Group Setup →")
-        self._continue_button.setFixedWidth(240)
-        self._continue_button.setEnabled(False)
-        self._continue_button.clicked.connect(self._on_continue_to_group)
-        layout.addWidget(self._continue_button)
         layout.addSpacing(40)
 
     # -- Section 3: Create Group Identifier -----------------------------
@@ -399,16 +401,13 @@ class WhisperSetupPage(LocksmithFormPage):
         if state.init_step >= 2:
             # Restore the post-upload confirmation view for section 1.
             alias = state.chosen_identifier_alias
-            hab = self.app.vault.hby.habs.get(alias) if alias else None
+            hab = self.app.vault.hby.habByName(alias) if alias else None
             if hab:
                 self._apply_s1_uploaded(alias, hab.pre)
             self._section2.show()
-            self._continue_button.show()
-            self._continue_button.setEnabled(False)
             self._start_poller()
 
         if state.init_step >= 3:
-            self._continue_button.hide()
             self._section3.show()
             self._populate_section3(state)
 
@@ -434,24 +433,24 @@ class WhisperSetupPage(LocksmithFormPage):
         from keri.app.habbing import GroupHab
         self._id_dropdown.clear()
         self._id_alias_map: dict[str, str] = {}
-        logger.info(f"HABS HERE")
-        for alias, hab in self.app.vault.hby.habs.items():
-            logger.info(f"HAB HERE")
-            logger.info(f"{alias}, {hab}")
+        for aid, hab in self.app.vault.hby.habs.items():
+            logger.info(f"HERE aid: {aid}, alias {hab.name}")
             if isinstance(hab, GroupHab):
                 continue
-            self._id_alias_map[alias] = alias
-            self._id_dropdown.addItem(alias)
+            display = f"{hab.name} - {aid}"
+            self._id_alias_map[display] = aid
+            self._id_dropdown.addItem(display)
         self._id_dropdown.setCurrentIndex(-1)
 
     def _on_identifier_changed(self, index: int):
         if index < 0:
             self._id_aid_label.setText("")
             return
-        alias = self._id_dropdown.currentText()
-        hab = self.app.vault.hby.habs.get(alias)
+        display = self._id_dropdown.currentText()
+        aid = self._id_alias_map.get(display)
+        hab = self.app.vault.hby.habs.get(aid) if aid else None
         if hab:
-            self._id_aid_label.setText(f"{hab.pre[:24]}…{hab.pre[-8:]}")
+            self._id_aid_label.setText(f"{hab.name} - {aid}")
 
     def _apply_s1_uploaded(self, alias: str, aid: str):
         """Swap section 1 from selection mode to confirmation mode."""
@@ -469,12 +468,13 @@ class WhisperSetupPage(LocksmithFormPage):
     @qasync.asyncSlot()
     async def _on_upload_clicked(self):
         state = self._get_init_state()
-        alias = self._id_dropdown.currentText()
-        if not alias:
+        display = self._id_dropdown.currentText()
+        if not display:
             self.show_error("Please select an identifier.")
             return
 
-        hab = self.app.vault.hby.habs.get(alias)
+        aid = self._id_alias_map.get(display)
+        hab = self.app.vault.hby.habs.get(aid) if aid else None
         if hab is None:
             self.show_error("Selected identifier not found.")
             return
@@ -488,18 +488,29 @@ class WhisperSetupPage(LocksmithFormPage):
         except Exception:
             pass
 
+        # Serialize the full KEL (events + attachments) from local LMDB.
+        try:
+            kel_bytes = b"".join(self.app.vault.hby.db.clonePreIter(pre=hab.pre, fn=0))
+        except Exception as e:
+            self.show_error(f"Failed to serialize KEL for upload: {e}")
+            return
+
+        if not kel_bytes:
+            self.show_error("No KEL events found for selected identifier — cannot upload.")
+            return
+
         self._upload_button.setEnabled(False)
         self._upload_button.setText("Uploading…")
         self.clear_error()
 
-        result = await remoting.upload_identifier(self.app, aid=hab.pre, alias=alias, oobi=oobi)
+        result = await remoting.upload_identifier(self.app, aid=hab.pre, alias=hab.name, kel_bytes=kel_bytes, oobi=oobi)
 
         self._upload_button.setEnabled(True)
         self._upload_button.setText("Upload to Weirwood")
 
         if result.get("conflict"):
             self.show_error(
-                f"The alias '{alias}' is already uploaded to weirwood. "
+                f"The alias '{hab.name}' is already uploaded to weirwood. "
                 "Rename your local identifier if this is your first upload."
             )
             return
@@ -509,15 +520,16 @@ class WhisperSetupPage(LocksmithFormPage):
             return
 
         self.clear_error()
-        state.chosen_identifier_alias = alias
+        state.chosen_identifier_alias = hab.name
+        state.chosen_identifier_aid = hab.pre
         state.identifier_uploaded = True
         state.init_step = 2
         self._save_init_state(state)
 
-        self._apply_s1_uploaded(alias, hab.pre)
+        self._apply_s1_uploaded(hab.name, hab.pre)
         self._section2.show()
-        self._start_poller()
         self._scroll_to_bottom()
+        self._start_poller()
 
     # ------------------------------------------------------------------
     # Section 2
@@ -535,32 +547,33 @@ class WhisperSetupPage(LocksmithFormPage):
     def _on_identifiers_changed(self, identifiers: list[dict]):
         self._weirwood_identifiers = identifiers
         state = self._get_init_state()
-        # Peers are all identifiers except our own
-        peers = [i for i in identifiers if i["aid"] != self.app.vault.hby.habs.get(state.chosen_identifier_alias, None) and True]
-        # Simpler: just exclude current user's chosen aid
         chosen_alias = state.chosen_identifier_alias
-        chosen_hab = self.app.vault.hby.habs.get(chosen_alias)
+        chosen_hab = self.app.vault.hby.habByName(chosen_alias)
         chosen_aid = chosen_hab.pre if chosen_hab else ""
         peers = [i for i in identifiers if i["aid"] != chosen_aid]
 
         count = len(peers)
-        self._peer_count_label.setText(
-            f"{count} peer(s) have joined weirwood"
-        )
-        self._continue_button.setEnabled(count >= 1)
+        self._peer_count_label.setText(f"{count} peer(s) have joined weirwood")
 
-        # If section 3 is visible, refresh the participant selector
-        if self._section3.isVisible():
-            self._populate_section3(state)
-
-    def _on_continue_to_group(self):
-        state = self._get_init_state()
-        state.init_step = 3
-        self._save_init_state(state)
-        self._continue_button.hide()
-        self._populate_section3(state)
-        self._section3.show()
-        self._scroll_to_bottom()
+        if count >= 1:
+            self._s2_header_lbl.setText("Weirwood Peers are Available!")
+            self._s2_subtext_lbl.setText(
+                "Multiple Weirwood peers are available to form a group identifier."
+            )
+            # Auto-advance to section 3 if not already there.
+            if not self._section3.isVisible():
+                state.init_step = 3
+                self._save_init_state(state)
+                self._populate_section3(state)
+                self._section3.show()
+                self._scroll_to_bottom()
+            else:
+                # Refresh participant selector with updated identifiers.
+                self._populate_section3(state)
+        else:
+            # If section 3 is already visible, still refresh the participant selector.
+            if self._section3.isVisible():
+                self._populate_section3(state)
 
     # ------------------------------------------------------------------
     # Section 3
@@ -569,7 +582,7 @@ class WhisperSetupPage(LocksmithFormPage):
     def _populate_section3(self, state: WhisperInitState):
         """Populate participant selector from current weirwood identifiers."""
         alias = state.chosen_identifier_alias
-        hab = self.app.vault.hby.habs.get(alias)
+        hab = self.app.vault.hby.habByName(alias)
 
         # Rebuild participant selector from weirwood identifiers (excluding own)
         chosen_aid = hab.pre if hab else ""
@@ -601,7 +614,7 @@ class WhisperSetupPage(LocksmithFormPage):
             return
 
         chosen_alias = state.chosen_identifier_alias
-        mhab = self.app.vault.hby.habs.get(chosen_alias)
+        mhab = self.app.vault.hby.habByName(chosen_alias)
         if mhab is None:
             self.show_error("Your signing identifier was not found in the vault.")
             return

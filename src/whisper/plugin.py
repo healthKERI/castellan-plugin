@@ -21,6 +21,9 @@ from locksmith.plugins.base import (
 from locksmith.ui.vault.menu import MenuButton
 from locksmith.ui.toolkit.widgets.buttons import BackButton, LocksmithButton
 
+from keri.peer import exchanging as keri_exchanging
+from keri.app import grouping as keri_grouping
+
 from .db.basing import WhisperBaser, sync_account_to_whisper
 
 if TYPE_CHECKING:
@@ -80,7 +83,7 @@ class WhisperPlugin(
 
     def _build_menu(self) -> None:
         self._account_button = MenuButton(
-            QIcon(":/assets/material-icons/forest.svg"),
+            QIcon(":/assets/custom/logos/full-color-owl-only.png"),
             "Whisper Credentials"
         )
         self._account_button.is_account_btn = True
@@ -183,11 +186,15 @@ class WhisperPlugin(
                     hab=hab
                 )
 
+        whisper_exc = keri_exchanging.Exchanger(hby=vault.hby, handlers=[])
+        keri_grouping.loadHandlers(exc=whisper_exc, mux=vault.mux)
+
         vault.plugin_state["whisper"] = {
             "account": account,
             "team": team,
             "essr": essr,
             "db": self._db,
+            "exc": whisper_exc,
         }
 
         if hasattr(vault, 'signals') and vault.signals:
@@ -201,7 +208,10 @@ class WhisperPlugin(
         from .init.poller import UploadedIdentifierPoller
         from .init.doers import WeirwoodMessagePoller
         self._identifier_poller = UploadedIdentifierPoller(self._app)
-        self._message_poller = WeirwoodMessagePoller(self._app)
+        self._message_poller = WeirwoodMessagePoller(
+            self._app,
+            exc=vault.plugin_state["whisper"]["exc"],
+        )
         vault.extend([self._identifier_poller, self._message_poller])
 
     def on_vault_closed(self, vault: "Vault") -> None:
@@ -220,11 +230,11 @@ class WhisperPlugin(
             self._db.close()
             self._db = None
 
-    def _on_new_notification(self, notification) -> None:
+    def _on_new_notification(self, notification: dict) -> None:
         """Intercept vault notifications and open the appropriate whisper dialog."""
         try:
-            route = notification.attrs.get("r", "") if hasattr(notification, "attrs") else ""
-            said = notification.attrs.get("d", "") if hasattr(notification, "attrs") else ""
+            route = notification.get("r", "")
+            said = notification.get("d", "")
             if not said:
                 return
             vault_page = self._get_vault_page()

@@ -4,6 +4,7 @@ whisper.core.remoting module
 
 Functions for interacting with the Weirwood credential management server.
 """
+import base64
 import json
 import urllib.parse
 from typing import TYPE_CHECKING, Dict, Any, Optional
@@ -33,10 +34,15 @@ async def upload_identifier(
     app: "LocksmithApplication",
     aid: str,
     alias: str,
+    kel_bytes: bytes,
     oobi: str = "",
 ) -> Dict[str, Any]:
     """
     Upload a whisper identifier to weirwood POST /identifiers.
+
+    Sends a multipart/form-data request with:
+      doc — JSON metadata {aid, alias, oobi}
+      kel — raw CESR-encoded KEL bytes
 
     Returns dict with 'success' bool and, on success, the stored identifier doc.
     Returns 'conflict': True when weirwood returns 409 (alias already taken).
@@ -46,10 +52,14 @@ async def upload_identifier(
         return {'success': False, 'error': 'No ESSR connection'}
 
     try:
+        files = {
+            'doc': ('doc.json', json.dumps({"aid": aid, "alias": alias, "oobi": oobi}), 'application/json'),
+            'kel': ('kel.cesr', kel_bytes, 'application/octet-stream'),
+        }
         response = await essr.request(
             path="/identifiers",
             method="POST",
-            json={"aid": aid, "alias": alias, "oobi": oobi},
+            files=files,
             timeout=30,
         )
         if response is not None and response.status_code in (200, 201):
@@ -63,6 +73,39 @@ async def upload_identifier(
             }
     except Exception as e:
         logger.error(f"Error uploading identifier: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def fetch_identifier_kel(app: "LocksmithApplication", aid: str) -> Dict[str, Any]:
+    """
+    GET /identifiers/{aid}/kel — fetch the CESR KEL stream for a peer identifier.
+
+    Returns dict with 'success' bool and, on success, 'kel_bytes' (raw bytes).
+    Returns empty kel_bytes if the identifier exists but KEL has not been captured yet.
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        response = await essr.request(
+            path=f"/identifiers/{aid}/kel",
+            method="GET",
+        )
+        if response is not None and response.status_code == 200:
+            data = response.json()
+            kel_b64 = data.get("kel", "")
+            kel_bytes = base64.b64decode(kel_b64) if kel_b64 else b""
+            return {'success': True, 'kel_bytes': kel_bytes}
+        elif response is not None and response.status_code == 404:
+            return {'success': False, 'error': 'Identifier not found on weirwood'}
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}",
+            }
+    except Exception as e:
+        logger.error(f"Error fetching KEL for {aid}: {e}")
         return {'success': False, 'error': str(e)}
 
 
@@ -405,7 +448,7 @@ async def post_tel_event(
         response = await essr.request(
             path="/registrar/tel-events",
             method="POST",
-            content=raw_event,
+            data=raw_event,
             headers={"Content-Type": "application/cesr"},
             timeout=30,
         )
@@ -463,9 +506,14 @@ async def post_message(
     recipient_aid: str,
     topic: str,
     raw: bytes,
+    sender_aid: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    POST a CESR-encoded message to weirwood /messages for a recipient AID.
+    POST a CESR-encoded message to weirwood /messages.
+
+    `sender_aid` is the whisper-uploaded identifier of the local participant.
+    `recipient_aid` is the target group participant's whisper-uploaded AID.
+    One call per recipient is required.
 
     Returns dict with 'success' bool and, on success, the stored Message doc.
     """
@@ -473,15 +521,19 @@ async def post_message(
     if not essr:
         return {'success': False, 'error': 'No ESSR connection'}
 
+    if not sender_aid:
+        return {'success': False, 'error': 'No sender AID provided for message post'}
+
     try:
         params = (
             f"recipient={urllib.parse.quote(recipient_aid, safe='')}"
+            f"&sender={urllib.parse.quote(sender_aid, safe='')}"
             f"&topic={urllib.parse.quote(topic, safe='')}"
         )
         response = await essr.request(
             path=f"/messages?{params}",
             method="POST",
-            content=raw,
+            data=raw,
             headers={"Content-Type": "application/cesr"},
             timeout=30,
         )
@@ -499,13 +551,17 @@ async def post_message(
 
 async def fetch_messages(
     app: "LocksmithApplication",
+    aid: Optional[str] = None,
     topic: Optional[str] = None,
     unread_only: bool = True,
     page: int = 0,
     page_size: int = 50,
 ) -> Dict[str, Any]:
     """
-    GET messages from weirwood /messages for the authenticated AID.
+    GET messages from weirwood /messages for the given AID.
+
+    `aid` must be the whisper-uploaded identifier prefix; it is passed as an
+    explicit query param so weirwood does not need to derive it from ESSR context.
 
     Returns dict with 'success' bool and, on success, 'messages' list.
     """
@@ -513,8 +569,11 @@ async def fetch_messages(
     if not essr:
         return {'success': False, 'error': 'No ESSR connection'}
 
+    if not aid:
+        return {'success': False, 'error': 'No AID provided for message fetch'}
+
     try:
-        params = [f"page={page}", f"page_size={page_size}"]
+        params = [f"aid={urllib.parse.quote(aid, safe='')}", f"page={page}", f"page_size={page_size}"]
         if topic:
             params.append(f"topic={urllib.parse.quote(topic, safe='')}")
         if unread_only:

@@ -21,7 +21,7 @@ import qasync
 from hio.base import doing
 from keri.app import grouping as keri_grouping
 from keri.app.habbing import GroupHab
-from keri.core import coring, serdering
+from keri.core import coring, serdering, parsing
 from keri.peer import exchanging
 from keri.vdr import credentialing as vdr_credentialing
 
@@ -50,35 +50,88 @@ class WeirwoodMessagePoller(doing.Doer):
     Must be registered as a vault doer via app.vault.extend([poller]).
     """
 
-    def __init__(self, app: "LocksmithApplication", tock: float = 5.0):
+    def __init__(self, app: "LocksmithApplication", exc, tock: float = 10.0):
         self.app = app
+        self.exc = exc
         super().__init__(tock=tock)
+        logger.info("WeirwoodMessagePoller initialized")
 
     def recur(self, tyme):
-        self._poll()
+        asyncio.get_event_loop().create_task(self._poll())
         return False
 
-    @qasync.asyncSlot()
     async def _poll(self):
+        db = self.app.vault.plugin_state.get("whisper", {}).get("db")
+        state = db.whisperInitState.get(keys=("init",)) if db else None
+        whisper_aid = state.chosen_identifier_aid if state else None
         result = await remoting.fetch_messages(
-            self.app, topic=_TOPIC_MULTISIG, unread_only=True
+            self.app, aid=whisper_aid, topic=_TOPIC_MULTISIG, unread_only=True
         )
         if not result.get("success"):
+            logger.info(f"Failed to fetch messages: {result.get('error', 'Unknown error')}")
             return
 
-        parser = self.app.vault.parser
-        for msg in result.get("messages", []):
+        messages = result.get("messages", [])
+        if not messages:
+            return
+
+        logger.info(f"Successfully fetched {len(messages)} messages")
+
+        self.exc.processEscrow()
+
+        parser = parsing.Parser(
+            kvy=self.app.vault.hby.kvy,
+            rvy=self.app.vault.hby.rvy,
+            exc=self.exc,
+            local=False,
+        )
+
+        for msg in messages:
             raw_str = msg.get("raw", "")
             if not raw_str:
                 continue
             try:
-                raw = raw_str.encode("latin-1") if isinstance(raw_str, str) else raw_str
+                raw = raw_str.encode("utf-8") if isinstance(raw_str, str) else raw_str
                 parser.parse(ims=bytearray(raw), local=False)
                 await remoting.mark_message_read(self.app, msg["id"])
             except Exception as e:
                 logger.warning(f"Failed to process message {msg.get('id')}: {e}")
 
+        # Drain the dedicated exchanger's cues and emit Qt signals
+        # so the plugin UI can react (e.g. open the join dialog).
+        self._drain_cues()
 
+    def _drain_cues(self):
+        """Convert exchanger cues into new_notification Qt signals."""
+        while self.exc.cues:
+            cue = self.exc.cues.popleft()
+            kin = cue.get("kin")
+
+            if kin == "saved":
+                said = cue.get("said", "")
+                if not said:
+                    continue
+
+                exn = self.app.vault.hby.db.exns.get(keys=(said,))
+                if exn is None:
+                    logger.warning(f"Cue references exn said={said} but not found in db")
+                    continue
+
+                route = exn.ked.get("r", "")
+                logger.info(f"Whisper exchanger saved exn: route={route} said={said}")
+
+                signals = getattr(self.app.vault, "signals", None)
+                if signals and hasattr(signals, "new_notification"):
+                    signals.new_notification.emit({"r": route, "d": said})
+
+            elif kin == "query":
+                # The exchanger couldn't find the sender's key state.
+                # Log it; a future poll cycle will retry after escrow processing.
+                q = cue.get("q", {})
+                logger.info(f"Whisper exchanger needs key state query: {q}")
+
+            else:
+                logger.debug(f"Whisper exchanger cue ignored: kin={kin}")
 # ---------------------------------------------------------------------------
 # WhisperGroupMultisigInceptDoer
 # ---------------------------------------------------------------------------
@@ -152,7 +205,7 @@ class WhisperGroupMultisigInceptDoer(doing.DoDoer):
             others = [pre for pre in self.smids if pre != self.mhab.pre]
             for recpt in others:
                 asyncio.get_event_loop().create_task(
-                    remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw)
+                    remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw, sender_aid=self.mhab.pre)
                 )
                 logger.info(f"Queued weirwood icp EXN for {recpt[:16]}...")
 
@@ -267,7 +320,7 @@ class WhisperMultisigJoinDoer(doing.DoDoer):
             others = [pre for pre in smids if pre != self.mhab.pre]
             for recpt in others:
                 asyncio.get_event_loop().create_task(
-                    remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw)
+                    remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw, sender_aid=self.mhab.pre)
                 )
 
             prefixer = coring.Prefixer(qb64=ghab.pre)
@@ -334,7 +387,7 @@ class CreateRegistryDoer(doing.DoDoer):
         _ = (yield self.tock)
 
         try:
-            hab = self.hby.habs.get(self.hab_alias)
+            hab = self.hby.habByName(self.hab_alias)
             if hab is None:
                 raise ValueError(f"Identifier '{self.hab_alias}' not found")
             if self.rgy.registryByName(self.registry_name) is not None:
@@ -379,7 +432,7 @@ class CreateRegistryDoer(doing.DoDoer):
                     others = [pre for pre in smids if pre != hab.mhab.pre]
                     for recpt in others:
                         asyncio.get_event_loop().create_task(
-                            remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw)
+                            remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw, sender_aid=hab.mhab.pre)
                         )
                         logger.info(f"Queued weirwood vcp EXN for {recpt[:16]}...")
                 except Exception as e:
@@ -506,7 +559,7 @@ class WhisperRegistryAcceptDoer(doing.DoDoer):
             others = [pre for pre in smids if pre != self.mhab.pre]
             for recpt in others:
                 asyncio.get_event_loop().create_task(
-                    remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw)
+                    remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw, sender_aid=self.mhab.pre)
                 )
 
             if self.signal_bridge:

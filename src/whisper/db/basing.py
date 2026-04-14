@@ -46,6 +46,7 @@ class WhisperInitState:
     """
     init_step: int = 1                      # 1=choose identifier, 2=wait, 3=group, 4=progress
     chosen_identifier_alias: str = ""       # local hab alias selected in step 1
+    chosen_identifier_aid: str = ""         # AID (prefix) of the uploaded whisper identifier
     identifier_uploaded: bool = False       # whether POST /identifiers succeeded
     group_identifier_alias: str = ""        # group hab alias created in step 3
     init_complete: bool = False             # True once registry is confirmed
