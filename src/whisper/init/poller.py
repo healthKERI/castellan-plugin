@@ -120,8 +120,8 @@ class UploadedIdentifierPoller(doing.Doer):
 
             logger.info(f"_fetch_and_parse_kel: received {len(kel_bytes)} bytes of KEL for {aid[:16]}...")
             ims = bytearray(kel_bytes)
-            parsing.Parser(kvy=self.app.vault.hby.kvy, rvy=self.app.vault.hby.rvy, local=False).parse(ims)
-            self.app.vault.hby.kvy.processEscrows()
+            parsing.Parser(kvy=self.app.vault.kvy, rvy=self.app.vault.hby.rvy, local=False).parse(ims)
+            self.app.vault.kvy.processEscrows()
             logger.info(f"_fetch_and_parse_kel: KEL parsed and escrows processed for {aid[:16]}...")
 
             remoteId = {

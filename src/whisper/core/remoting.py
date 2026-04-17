@@ -619,3 +619,31 @@ async def mark_message_read(
     except Exception as e:
         logger.error(f"Error marking message read: {e}")
         return {'success': False, 'error': str(e)}
+
+
+async def fetch_backer(app: "LocksmithApplication") -> Dict[str, Any]:
+    """
+    GET /registrar/backer — fetch weirwood's non-transferable backer identifier.
+
+    Returns the backer AID and its base64-encoded CESR KEL so whisper can:
+      1. Include the backer AID in registry ``baks`` lists.
+      2. Parse the KEL into the local Kevery for signature verification.
+
+    Returns dict with 'success' bool and, on success, 'aid' and 'kel_b64'.
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        response = await essr.request(path="/registrar/backer", method="GET")
+        if response is not None and response.status_code == 200:
+            data = response.json()
+            return {'success': True, 'aid': data['aid'], 'kel_b64': data['kel_b64']}
+        return {
+            'success': False,
+            'error': f"API error: {response.status_code if response else 'No response'}",
+        }
+    except Exception as e:
+        logger.error(f"Error fetching weirwood backer: {e}")
+        return {'success': False, 'error': str(e)}

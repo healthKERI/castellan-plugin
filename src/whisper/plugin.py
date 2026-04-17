@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QWidget
 from keri import help
+from keri.app.grouping import MultisigNotificationHandler
 
 from locksmith.core.essring import APIClient
 from locksmith.plugins.base import (
@@ -206,13 +207,46 @@ class WhisperPlugin(
 
         # Register background doers for weirwood polling.
         from .init.poller import UploadedIdentifierPoller
-        from .init.doers import WeirwoodMessagePoller
+        from .init.doers import WeirwoodMessagePoller, WeirwoodBackerFetchDoer
         self._identifier_poller = UploadedIdentifierPoller(self._app)
         self._message_poller = WeirwoodMessagePoller(
             self._app,
             exc=vault.plugin_state["whisper"]["exc"],
         )
-        vault.extend([self._identifier_poller, self._message_poller])
+        self._backer_fetch_doer = WeirwoodBackerFetchDoer(self._app)
+        vault.extend([self._identifier_poller, self._message_poller, self._backer_fetch_doer])
+
+        _init_state = self._db.whisperInitState.get(keys=("init",))
+        if (
+                _init_state is not None
+                and _init_state.init_step == 3
+                and _init_state.group_identifier_alias
+        ):
+            from keri.app.habbing import GroupHab as _GroupHab
+            from keri.core import coring as _kc
+            from .init.doers import WhisperCounselingCompletionDoer
+
+            for (pre,), (seqner, _saider) in vault.hby.db.gpse.getItemIter():
+                _hab = vault.hby.habByPre(pre)
+                if (
+                        _hab is not None
+                        and isinstance(_hab, _GroupHab)
+                        and _hab.name == _init_state.group_identifier_alias
+                ):
+                    _completion_doer = WhisperCounselingCompletionDoer(
+                        app=self._app,
+                        prefixer=_kc.Prefixer(qb64=pre),
+                        seqner=seqner,
+                        ghab=_hab,
+                        is_proposer=_init_state.is_proposer,
+                    )
+                    vault.extend([_completion_doer])
+                    logger.info(
+                        f"Whisper: resuming group counseling for '{_hab.name}' "
+                        f"({'proposer' if _init_state.is_proposer else 'joiner'})"
+                    )
+                    break
+
 
     def on_vault_closed(self, vault: "Vault") -> None:
         if hasattr(vault, 'signals') and vault.signals:
@@ -241,21 +275,47 @@ class WhisperPlugin(
             if vault_page is None:
                 return
             if "/multisig/icp" in route:
-                from .init.accept_group import AcceptGroupProposalDialog
-                dialog = AcceptGroupProposalDialog(
-                    app=self._app,
-                    parent=vault_page,
-                    proposal_said=said,
-                )
-                dialog.open()
+                # Distinguish a new invitation (group hab doesn't exist yet) from a
+                # co-signer response to our own proposal (group hab already exists).
+                _is_response = False
+                _exn = self._app.vault.hby.db.exns.get(keys=(said,))
+                if _exn is not None:
+                    _icp_sad = _exn.ked.get("e", {}).get("icp", {})
+                    _gid = _icp_sad.get("i", "") if isinstance(_icp_sad, dict) else ""
+                    if _gid and self._app.vault.hby.habs.get(_gid) is not None:
+                        _is_response = True
+                        _sender = _exn.ked.get("i", "")
+                        if _sender:
+                            self._app.vault.plugin_state.setdefault("whisper", {}).setdefault(
+                                "group_join_tracker", set()
+                            ).add(_sender)
+                if not _is_response:
+                    from .init.accept_group import AcceptGroupProposalDialog
+                    dialog = AcceptGroupProposalDialog(
+                        app=self._app,
+                        parent=vault_page,
+                        proposal_said=said,
+                    )
+                    dialog.open()
             elif "/multisig/vcp" in route:
-                from .init.accept_registry import AcceptRegistryProposalDialog
-                dialog = AcceptRegistryProposalDialog(
-                    app=self._app,
-                    parent=vault_page,
-                    proposal_said=said,
-                )
-                dialog.open()
+                _is_response = False
+                _exn = self._app.vault.hby.db.exns.get(keys=(said,))
+                if _exn is not None:
+                    _gid = _exn.ked.get("a", {}).get("gid", "")
+                    if _gid:
+                        _ghab = self._app.vault.hby.habs.get(_gid)
+                        if _ghab is not None:
+                            _reg_name = f"{_ghab.name}-registry"
+                            if self._app.vault.rgy.registryByName(_reg_name) is not None:
+                                _is_response = True
+                if not _is_response:
+                    from .init.accept_registry import AcceptRegistryProposalDialog
+                    dialog = AcceptRegistryProposalDialog(
+                        app=self._app,
+                        parent=vault_page,
+                        proposal_said=said,
+                    )
+                    dialog.open()
         except Exception:
             logger.exception("Error handling new notification in WhisperPlugin")
 

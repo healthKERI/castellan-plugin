@@ -49,6 +49,7 @@ class WhisperInitState:
     chosen_identifier_aid: str = ""         # AID (prefix) of the uploaded whisper identifier
     identifier_uploaded: bool = False       # whether POST /identifiers succeeded
     group_identifier_alias: str = ""        # group hab alias created in step 3
+    is_proposer: bool = True                # distinguishes proposer from joiner at step 3/4
     init_complete: bool = False             # True once registry is confirmed
 
 

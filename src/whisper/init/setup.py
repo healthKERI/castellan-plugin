@@ -409,10 +409,28 @@ class WhisperSetupPage(LocksmithFormPage):
 
         if state.init_step >= 3:
             self._section3.show()
+            if state.init_step == 3 and state.group_identifier_alias and not state.init_complete:
+                from keri.core import coring as _kc
+                _ghab = self.app.vault.hby.habByName(state.group_identifier_alias)
+                if _ghab is not None:
+                    _pfx = _kc.Prefixer(qb64=_ghab.pre)
+                    _seq = _kc.Seqner(sn=0)
+                    if self.app.vault.counselor.complete(_pfx, _seq):
+                        self._show_section4(state.group_identifier_alias, state.is_proposer)
             self._populate_section3(state)
 
         if state.init_step >= 4:
             self._section4.show()
+            if not state.init_complete and state.group_identifier_alias:
+                if state.is_proposer:
+                    registry_name = f"{state.group_identifier_alias}-registry"
+                    registry = self.app.vault.rgy.registryByName(registry_name)
+                    if registry is None:
+                        self._launch_create_registry_doer(state.group_identifier_alias)
+                    else:
+                        # Registry exists but init_complete not written — mark done
+                        self._on_init_complete(registry.regk)
+                        # Joiner: waiting UI is shown; WeirwoodMessagePoller handles /multisig/vcp
 
         # Reconnect doer event listener for the current vault.
         if self.app.vault and hasattr(self.app.vault, "signals"):
@@ -434,7 +452,6 @@ class WhisperSetupPage(LocksmithFormPage):
         self._id_dropdown.clear()
         self._id_alias_map: dict[str, str] = {}
         for aid, hab in self.app.vault.hby.habs.items():
-            logger.info(f"HERE aid: {aid}, alias {hab.name}")
             if isinstance(hab, GroupHab):
                 continue
             display = f"{hab.name} - {aid}"
@@ -460,7 +477,7 @@ class WhisperSetupPage(LocksmithFormPage):
             "you in the shared network."
         )
         self._s1_chosen_name_lbl.setText(alias)
-        self._s1_chosen_aid_lbl.setText(f"{aid[:32]}…{aid[-8:]}" if len(aid) > 44 else aid)
+        self._s1_chosen_aid_lbl.setText(aid)
         self._s1_input.hide()
         self._id_aid_label.hide()
         self._s1_chosen.show()
@@ -638,6 +655,10 @@ class WhisperSetupPage(LocksmithFormPage):
         nsith = self._rotation_threshold.text().strip() or "1"
         toad = int(self._toad_field.text().strip() or "0")
 
+        state.group_identifier_alias = alias
+        state.is_proposer = True
+        self._save_init_state(state)
+
         self._create_group_button.setEnabled(False)
         self._create_group_button.setText("Creating…")
         self.clear_error()
@@ -657,21 +678,41 @@ class WhisperSetupPage(LocksmithFormPage):
     # ------------------------------------------------------------------
     # Section 4
     # ------------------------------------------------------------------
-
-    def _show_section4(self, group_alias: str):
-        """Reveal section 4 and start CreateRegistryDoer."""
+    def _show_section4(self, group_alias: str, is_proposer: bool):
+        """Reveal section 4. Proposer launches CreateRegistryDoer; joiner waits."""
         state = self._get_init_state()
         state.group_identifier_alias = group_alias
+        state.is_proposer = is_proposer
         state.init_step = 4
         self._save_init_state(state)
 
         self._section4.show()
         self._scroll_to_bottom()
 
-        weirwood_cfg = self.app.config.plugin_configs.get("whisper", {})
-        weirwood_aid = weirwood_cfg.get("weirwood_aid", "")
-        registry_name = f"{group_alias}-registry"
+        r1 = self._round1_frame.findChild(QLabel, "status_label")
+        if is_proposer:
+            if r1:
+                r1.setStyleSheet(f"font-size: 13px; color: {colors.SUCCESS};")
+            if self._round2_status_label:
+                self._round2_status_label.setText(
+                    "Waiting for all participants to confirm registry creation…"
+                )
+            self._launch_create_registry_doer(group_alias)
+        else:
+            if r1:
+                r1.setText("✓ Group identifier joined")
+                r1.setStyleSheet(f"font-size: 13px; color: {colors.SUCCESS};")
+            if self._round2_status_label:
+                self._round2_status_label.setText(
+                    "Waiting for registry proposal from group creator…"
+                )
 
+    def _launch_create_registry_doer(self, group_alias: str):
+        """Launch CreateRegistryDoer for the given group alias."""
+        weirwood_cfg = self.app.config.plugin_configs.get("whisper", {})
+        backer_aid = self.app.vault.plugin_state.get("whisper", {}).get("backer_aid", "")
+        weirwood_aid = backer_aid or weirwood_cfg.get("weirwood_aid", "")
+        registry_name = f"{group_alias}-registry"
         doer = CreateRegistryDoer(
             app=self.app,
             hab_alias=group_alias,
@@ -688,34 +729,22 @@ class WhisperSetupPage(LocksmithFormPage):
     def _on_doer_event(self, doer_name: str, event_type: str, data: dict):
         if doer_name == "WhisperGroupMultisigInceptDoer":
             if event_type == "group_identifier_created":
-                group_alias = data.get("alias", "")
-                # Update round 1 status
-                r1_status = self._round1_frame.findChild(QLabel, "status_label")
-                if r1_status:
-                    r1_status.setText("✓ Group identifier created")
-                    r1_status.setStyleSheet(f"font-size: 13px; color: {colors.SUCCESS};")
-                self._show_section4(group_alias)
-
-                # Update round 2 status label
-                if self._round2_status_label:
-                    self._round2_status_label.setText(
-                        "Waiting for all participants to confirm registry creation…"
-                    )
-
+                self._show_section4(data.get("alias", ""), is_proposer=True)
             elif event_type == "group_inception_failed":
                 self._create_group_button.setEnabled(True)
                 self._create_group_button.setText("Create Group Identifier")
                 self.show_error(f"Group creation failed: {data.get('error')}")
-
             elif event_type == "group_inception_exn_sent":
                 self._create_group_button.setText("Waiting for participants…")
+
         elif doer_name == "WhisperMultisigJoinDoer":
             if event_type == "group_identifier_joined":
-                group_alias = data.get("alias", "")
-                self._show_section4(group_alias)
+                self._show_section4(data.get("alias", ""), is_proposer=False)
+
         elif doer_name == "WhisperRegistryAcceptDoer":
             if event_type == "registry_accepted":
                 self._on_init_complete(data.get("regk", ""))
+
         elif doer_name == "CreateRegistryDoer":
             if event_type == "registry_created":
                 if self._round2_status_label:
@@ -724,7 +753,6 @@ class WhisperSetupPage(LocksmithFormPage):
                         f"font-size: 13px; color: {colors.SUCCESS};"
                     )
                 self._on_init_complete(data.get("regk", ""))
-
             elif event_type == "registry_creation_failed":
                 self.show_error(f"Registry creation failed: {data.get('error')}")
 

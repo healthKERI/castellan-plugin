@@ -15,6 +15,7 @@ Classes:
 from __future__ import annotations
 
 import asyncio
+import base64
 from typing import TYPE_CHECKING
 
 import qasync
@@ -22,10 +23,12 @@ from hio.base import doing
 from keri.app import grouping as keri_grouping
 from keri.app.habbing import GroupHab
 from keri.core import coring, serdering, parsing
+from keri.help import helping
 from keri.peer import exchanging
 from keri.vdr import credentialing as vdr_credentialing
 
 from ..core import remoting
+from ..db.basing import WhisperInitState
 
 if TYPE_CHECKING:
     from locksmith.core.apping import LocksmithApplication
@@ -36,6 +39,91 @@ logger = help.ogler.getLogger(__name__)
 
 _TOPIC_MULTISIG = "multisig"
 _REGISTRY_POLL_TIMEOUT = 60.0
+
+
+# ---------------------------------------------------------------------------
+# WeirwoodBackerFetchDoer
+# ---------------------------------------------------------------------------
+
+class WeirwoodBackerFetchDoer(doing.Doer):
+    """
+    One-shot doer that fetches weirwood's non-transferable backer identifier
+    AID and KEL on vault startup.
+
+    Retries every ``tock`` seconds until the fetch succeeds, then:
+      - Parses the backer KEL into the vault's Kevery so signatures can be
+        verified against it.
+      - Stores the backer AID in ``vault.plugin_state["whisper"]["backer_aid"]``
+        so registry creation doers can include it in ``baks`` lists.
+      - Removes itself from the vault doer list.
+    """
+
+    def __init__(self, app: "LocksmithApplication", tock: float = 5.0):
+        self.app = app
+        super().__init__(tock=tock)
+
+    def recur(self, tyme):
+        asyncio.get_event_loop().create_task(self._fetch())
+        return False
+
+    async def _fetch(self):
+        logger.info("WeirwoodBackerFetchDoer: starting fetch")
+        vault = self.app.vault
+        if not vault:
+            logger.warning("WeirwoodBackerFetchDoer: vault is not available, skipping")
+            return
+
+        result = await remoting.fetch_backer(self.app)
+        if not result.get("success"):
+            logger.debug(f"WeirwoodBackerFetchDoer: fetch failed ({result.get('error')}), will retry")
+            return  # will retry on next recur tick
+
+        aid = result["aid"]
+        kel_b64 = result.get("kel_b64", "")
+
+        if aid in vault.kvy.kevers:
+            logger.info(f"WeirwoodBackerFetchDoer: {aid[:16]}... already in kevers, skipping parse")
+        elif kel_b64:
+            try:
+                kel_bytes = base64.b64decode(kel_b64)
+                logger.info(f"WeirwoodBackerFetchDoer: received {len(kel_bytes)} bytes of KEL for {aid[:16]}...")
+                ims = bytearray(kel_bytes)
+                parsing.Parser(kvy=vault.kvy, local=False).parse(ims=ims)
+                vault.kvy.processEscrows()
+                logger.info(f"WeirwoodBackerFetchDoer: KEL parsed and escrows processed for {aid[:16]}...")
+            except Exception as e:
+                logger.warning(f"WeirwoodBackerFetchDoer: could not parse backer KEL: {e}")
+        else:
+            logger.warning(f"WeirwoodBackerFetchDoer: empty KEL returned for {aid[:16]}...")
+
+        vault.plugin_state.setdefault("whisper", {})["backer_aid"] = aid
+
+        remoteId = {
+            'alias': 'weirwood-backer',
+            'last-refresh': helping.nowIso8601()
+        }
+        vault.org.update(aid, remoteId)
+
+        if vault.signals:
+            vault.signals.emit_doer_event(
+                doer_name="ImportDoer",
+                event_type="remote_identifier_imported",
+                data={
+                    'alias': 'weirwood-backer',
+                    'pre': aid,
+                    'success': True
+                }
+            )
+            logger.info(f"WeirwoodBackerFetchDoer: remote_identifier_imported signal emitted for {aid[:16]}...")
+        else:
+            logger.warning(f"WeirwoodBackerFetchDoer: vault.signals is not available, could not emit event for {aid[:16]}...")
+
+        logger.info(f"Weirwood backer identifier resolved: {aid}")
+
+        try:
+            vault.remove([self])
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +266,8 @@ class WhisperGroupMultisigInceptDoer(doing.DoDoer):
                     {"alias": self.alias, "smids": self.smids},
                 )
 
+            self.app.vault.plugin_state.setdefault("whisper", {})["group_join_tracker"] = set()
+
             ghab = self.hby.makeGroupHab(
                 group=self.alias,
                 mhab=self.mhab,
@@ -227,6 +317,16 @@ class WhisperGroupMultisigInceptDoer(doing.DoDoer):
                 )
 
             while not self.counselor.complete(prefixer, seqner):
+                yield self.tock
+
+            _others = {pre for pre in self.smids if pre != self.mhab.pre}
+
+            while True:
+                _confirmed = self.app.vault.plugin_state.get("whisper", {}).get(
+                    "group_join_tracker", set()
+                )
+                if _others.issubset(_confirmed):
+                    break
                 yield self.tock
 
             logger.info(f"Group '{self.alias}' ({ghab.pre}) created successfully")
@@ -309,6 +409,20 @@ class WhisperMultisigJoinDoer(doing.DoDoer):
                 smids=smids, rmids=rmids, **inits,
             )
             own_icp = ghab.makeOwnInception(allowPartiallySigned=True)
+
+            # Persist role and alias immediately so vault restart can resume counseling
+            # via WhisperCounselingCompletionDoer (cannot rely on the signal path for this).
+            try:
+                _ws = self.app.vault.plugin_state.get("whisper", {})
+                _db = _ws.get("db")
+                if _db is not None:
+                    _s = _db.whisperInitState.get(keys=("init",)) or WhisperInitState()
+                    _s.group_identifier_alias = self.alias
+                    _s.is_proposer = False
+                    _db.whisperInitState.pin(keys=("init",), val=_s)
+            except Exception:
+                pass
+
             own_serder = serdering.SerderKERI(raw=own_icp)
 
             resp_exn, resp_atc = keri_grouping.multisigInceptExn(
@@ -410,6 +524,7 @@ class CreateRegistryDoer(doing.DoDoer):
             registrar = vdr_credentialing.Registrar(
                 hby=self.hby, rgy=self.rgy, counselor=self.counselor
             )
+            self.extend([registrar])
             registrar.incept(iserder=registry.vcp, anc=aserder)
 
             if self.signal_bridge:
@@ -438,7 +553,8 @@ class CreateRegistryDoer(doing.DoDoer):
                 except Exception as e:
                     logger.warning(f"Failed to send /multisig/vcp EXN: {e}")
 
-            # Poll for completion (counselor coordinates group ixn signatures)
+            # Poll for completion (counselor coordinates group ixn signatures;
+            # registrar escrow loop runs as a sub-doer via self.extend above)
             deadline = self.app.vault.tymth() + _REGISTRY_POLL_TIMEOUT
             while True:
                 self.rgy.processEscrows()
@@ -449,6 +565,8 @@ class CreateRegistryDoer(doing.DoDoer):
                         f"Registry '{self.registry_name}' timed out after {_REGISTRY_POLL_TIMEOUT}s"
                     )
                 yield self.tock
+
+            self.remove([registrar])
 
             # POST vcp to weirwood registrar
             asyncio.get_event_loop().create_task(
@@ -523,6 +641,21 @@ class WhisperRegistryAcceptDoer(doing.DoDoer):
 
             # Locate the group hab
             ghab = self.hby.habs.get(gid) or self.hby.habByName(gid)
+
+            # Guard: ensure our own group inception has finalized (sn=0 in cgms) before
+            # we attempt to create sn=1 group IXN. Needed in N-party setups where the
+            # proposer may send /multisig/vcp before all joiners have cleared their
+            # inception escrow.
+            _inc_prefixer = coring.Prefixer(qb64=ghab.pre)
+            _inc_seqner = coring.Seqner(sn=0)
+            _inc_deadline = self.app.vault.tymth() + _REGISTRY_POLL_TIMEOUT
+            while not self.counselor.complete(_inc_prefixer, _inc_seqner):
+                if self.app.vault.tymth() > _inc_deadline:
+                    raise RuntimeError(
+                        f"Timed out waiting for group inception to finalize: {ghab.pre[:16]}..."
+                    )
+                yield self.tock
+
             if ghab is None:
                 raise ValueError(f"Group hab not found for gid {gid[:16]}...")
 
@@ -545,6 +678,7 @@ class WhisperRegistryAcceptDoer(doing.DoDoer):
             registrar = vdr_credentialing.Registrar(
                 hby=self.hby, rgy=self.rgy, counselor=self.counselor
             )
+            self.extend([registrar])
             registrar.incept(iserder=registry.vcp, anc=own_anc_serder)
 
             # Send our signed response via weirwood
@@ -568,7 +702,7 @@ class WhisperRegistryAcceptDoer(doing.DoDoer):
                     {"regk": registry.regk},
                 )
 
-            # Poll for completion
+            # Poll for completion (registrar escrow loop runs via self.extend above)
             deadline = self.app.vault.tymth() + _REGISTRY_POLL_TIMEOUT
             while True:
                 self.rgy.processEscrows()
@@ -577,6 +711,8 @@ class WhisperRegistryAcceptDoer(doing.DoDoer):
                 if self.app.vault.tymth() > deadline:
                     raise RuntimeError("Registry acceptance timed out")
                 yield self.tock
+
+            self.remove([registrar])
 
             asyncio.get_event_loop().create_task(
                 remoting.post_tel_event(self.app, bytes(registry.vcp.raw))
@@ -599,3 +735,56 @@ class WhisperRegistryAcceptDoer(doing.DoDoer):
         finally:
             self.app.vault.remove([self])
             return
+
+
+class WhisperCounselingCompletionDoer(doing.DoDoer):
+    """
+    Resumes waiting for counselor completion after vault restart.
+
+    Created by WhisperPlugin.on_vault_opened() for any whisper setup group
+    whose inception escrow (db.gpse) was still open when the vault was closed.
+    Emits the same signal as the original doer so setup.py advances identically
+    to the non-restart path.
+    """
+
+    def __init__(self, app: "LocksmithApplication", prefixer, seqner, ghab,
+                 is_proposer: bool):
+        self.app = app
+        self.counselor = app.vault.counselor
+        self.prefixer = prefixer
+        self.seqner = seqner
+        self.ghab = ghab
+        self.is_proposer = is_proposer
+        super().__init__(doers=[doing.doify(self.complete_do)])
+
+    def complete_do(self, tymth, tock=0.0, **opts):
+        self.wind(tymth)
+        self.tock = tock
+        _ = (yield self.tock)
+
+        while not self.counselor.complete(self.prefixer, self.seqner):
+            yield self.tock
+
+        logger.info(
+            f"WhisperCounselingCompletionDoer: counseling complete for "
+            f"'{self.ghab.name}' ({'proposer' if self.is_proposer else 'joiner'})"
+        )
+
+        signals = getattr(self.app.vault, "signals", None)
+        if signals:
+            if self.is_proposer:
+                signals.emit_doer_event(
+                    "WhisperGroupMultisigInceptDoer", "group_identifier_created",
+                    {"alias": self.ghab.name, "pre": self.ghab.pre, "success": True},
+                )
+            else:
+                signals.emit_doer_event(
+                    "WhisperMultisigJoinDoer", "group_identifier_joined",
+                    {"alias": self.ghab.name, "pre": self.ghab.pre, "success": True},
+                )
+
+        try:
+            self.app.vault.remove([self])
+        except Exception:
+            pass
+        return
