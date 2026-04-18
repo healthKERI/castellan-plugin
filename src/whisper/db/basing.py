@@ -4,7 +4,7 @@ whisper.db.basing module
 
 Whisper-specific dataclasses and database (WhisperBaser).
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from keri import help
@@ -51,6 +51,12 @@ class WhisperInitState:
     group_identifier_alias: str = ""        # group hab alias created in step 3
     is_proposer: bool = True                # distinguishes proposer from joiner at step 3/4
     init_complete: bool = False             # True once registry is confirmed
+    section4_started: bool = False           # section 4 revealed but group inception not yet counselor-complete
+    group_signed_aids: list = field(default_factory=list)     # AIDs confirmed in group icp
+    registry_signed_aids: list = field(default_factory=list)  # AIDs confirmed in registry
+    group_isith: str = ""                    # signing threshold — persisted for joiner s3 lock display
+    group_nsith: str = ""                    # rotation threshold
+    group_toad: str = "0"                    # TOAD
 
 
 @dataclass

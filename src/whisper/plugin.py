@@ -289,6 +289,19 @@ class WhisperPlugin(
                             self._app.vault.plugin_state.setdefault("whisper", {}).setdefault(
                                 "group_join_tracker", set()
                             ).add(_sender)
+                            # Persist signer to state
+                            _db = self._app.vault.plugin_state.get("whisper", {}).get("db")
+                            if _db is not None:
+                                _ws = _db.whisperInitState.get(keys=("init",))
+                                if _ws is not None and _sender not in _ws.group_signed_aids:
+                                    _ws.group_signed_aids.append(_sender)
+                                    _db.whisperInitState.pin(keys=("init",), val=_ws)
+                            # Notify setup page
+                            if self._app.vault.signals:
+                                self._app.vault.signals.emit_doer_event(
+                                    "WhisperGroupMultisigInceptDoer", "group_participant_signed",
+                                    {"signer_aid": _sender}
+                                )
                 if not _is_response:
                     from .init.accept_group import AcceptGroupProposalDialog
                     dialog = AcceptGroupProposalDialog(
@@ -308,6 +321,22 @@ class WhisperPlugin(
                             _reg_name = f"{_ghab.name}-registry"
                             if self._app.vault.rgy.registryByName(_reg_name) is not None:
                                 _is_response = True
+                                _sender = _exn.ked.get("i", "")
+                                if _sender:
+                                    self._app.vault.plugin_state.setdefault("whisper", {}).setdefault(
+                                        "registry_sign_tracker", set()
+                                    ).add(_sender)
+                                    _db = self._app.vault.plugin_state.get("whisper", {}).get("db")
+                                    if _db is not None:
+                                        _ws = _db.whisperInitState.get(keys=("init",))
+                                        if _ws is not None and _sender not in _ws.registry_signed_aids:
+                                            _ws.registry_signed_aids.append(_sender)
+                                            _db.whisperInitState.pin(keys=("init",), val=_ws)
+                                    if self._app.vault.signals:
+                                        self._app.vault.signals.emit_doer_event(
+                                            "CreateRegistryDoer", "registry_participant_signed",
+                                            {"signer_aid": _sender}
+                                        )
                 if not _is_response:
                     from .init.accept_registry import AcceptRegistryProposalDialog
                     dialog = AcceptRegistryProposalDialog(

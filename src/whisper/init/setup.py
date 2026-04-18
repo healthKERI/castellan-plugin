@@ -31,6 +31,7 @@ from locksmith.ui.toolkit.widgets.fields import (
 )
 from locksmith.ui.toolkit.widgets.page import LocksmithFormPage
 from locksmith.ui.toolkit.widgets.extensible import ExtensibleSelectorWidget
+from locksmith.ui.styles import get_monospace_font_family
 
 from ..core import remoting
 from ..db.basing import WhisperInitState
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
     from locksmith.ui.vault.page import VaultPage
 
 from keri import help
+from keri.vdr import credentialing as vdr_credentialing
 
 logger = help.ogler.getLogger(__name__)
 
@@ -158,7 +160,7 @@ class WhisperSetupPage(LocksmithFormPage):
 
         self._id_aid_label = QLabel("")
         self._id_aid_label.setStyleSheet(
-            f"font-size: 11px; color: {colors.TEXT_SUBTLE}; font-family: monospace;"
+            f"font-size: 11px; color: {colors.TEXT_SUBTLE}; font-family: {get_monospace_font_family()};"
         )
         layout.addWidget(self._id_aid_label)
 
@@ -174,7 +176,7 @@ class WhisperSetupPage(LocksmithFormPage):
         s1_ch.addWidget(self._s1_chosen_name_lbl)
         self._s1_chosen_aid_lbl = QLabel("—")
         self._s1_chosen_aid_lbl.setStyleSheet(
-            f"font-size: 11px; color: {colors.TEXT_SUBTLE}; font-family: monospace;"
+            f"font-size: 11px; color: {colors.TEXT_SUBTLE}; font-family: {get_monospace_font_family()};"
         )
         s1_ch.addWidget(self._s1_chosen_aid_lbl)
         self._s1_chosen.hide()
@@ -212,19 +214,28 @@ class WhisperSetupPage(LocksmithFormPage):
     # -- Section 3: Create Group Identifier -----------------------------
 
     def _build_section3(self, layout: QVBoxLayout):
-        self._add_section_header(
-            layout,
-            "Create Group Identifier or Wait to Join a Group",
+        self._s3_header_lbl = QLabel("Create Group Identifier or Wait to Join a Group")
+        self._s3_header_lbl.setStyleSheet(
+            f"font-weight: bold; font-size: 20px; color: {colors.TEXT_MENU};"
+        )
+        layout.addWidget(self._s3_header_lbl)
+        layout.addSpacing(6)
+        self._s3_subtext_lbl = QLabel(
             "Select peers to include in your group multisig identifier and create it, "
             "or wait here — if a peer invites you to join their group you will receive "
             "a notification to accept.",
         )
+        self._s3_subtext_lbl.setWordWrap(True)
+        self._s3_subtext_lbl.setStyleSheet(
+            f"font-size: 13px; color: {colors.TEXT_SUBTLE}; font-weight: 200;"
+        )
+        layout.addWidget(self._s3_subtext_lbl)
         layout.addSpacing(12)
 
         self._group_alias_field = FloatingLabelLineEdit("Group Identifier Alias")
         self._group_alias_field.setFixedWidth(500)
         layout.addWidget(self._group_alias_field)
-        layout.addSpacing(12)
+        layout.addSpacing(16)
 
         participants_lbl = QLabel("Group Participants")
         participants_lbl.setStyleSheet("font-weight: 600; font-size: 14px;")
@@ -235,7 +246,35 @@ class WhisperSetupPage(LocksmithFormPage):
         self._participants_container_layout.setContentsMargins(0, 0, 0, 0)
         self._participants_selector: ExtensibleSelectorWidget | None = None
         layout.addWidget(self._participants_container)
-        layout.addSpacing(12)
+        layout.addSpacing(4)
+
+        # Frozen participant list (replaces selector when section 3 is locked)
+        self._s3_frozen_participants_widget = QWidget()
+        self._s3_frozen_participants_widget.hide()
+        self._s3_frozen_participants_layout = QVBoxLayout(self._s3_frozen_participants_widget)
+        self._s3_frozen_participants_layout.setContentsMargins(0, 0, 0, 0)
+        self._s3_frozen_participants_layout.setSpacing(0)
+        layout.addWidget(self._s3_frozen_participants_widget)
+
+        layout.addSpacing(8)
+
+        # Self-identity labels — always visible once section 3 is revealed
+        self._s3_self_widget = QWidget()
+        s3_self_vbox = QVBoxLayout(self._s3_self_widget)
+        s3_self_vbox.setContentsMargins(8, 0, 0, 0)
+        s3_self_vbox.setSpacing(4)
+        self._s3_self_name_lbl = QLabel("—")
+        self._s3_self_name_lbl.setStyleSheet(
+            f"font-size: 15px; font-weight: 600; color: {colors.TEXT_MENU};"
+        )
+        s3_self_vbox.addWidget(self._s3_self_name_lbl)
+        self._s3_self_aid_lbl = QLabel("—")
+        self._s3_self_aid_lbl.setStyleSheet(
+            f"font-size: 11px; color: {colors.TEXT_SUBTLE}; font-family: {get_monospace_font_family()};"
+        )
+        s3_self_vbox.addWidget(self._s3_self_aid_lbl)
+        layout.addWidget(self._s3_self_widget)
+        layout.addSpacing(16)
 
         thresholds_lbl = QLabel("Thresholds")
         thresholds_lbl.setStyleSheet("font-weight: 600; font-size: 14px;")
@@ -279,33 +318,24 @@ class WhisperSetupPage(LocksmithFormPage):
         layout.addSpacing(40)
 
     # -- Section 4: Progress --------------------------------------------
-
     def _build_section4(self, layout: QVBoxLayout):
-        self._add_section_header(
-            layout,
-            "Initializing…",
-            "Coordinating signatures across participants. This may take a moment.",
-        )
+        self._add_section_header(layout, "Initializing…",
+                                 "Coordinating signatures across participants.")
         layout.addSpacing(12)
 
-        # Round 1 frame
-        self._round1_frame = self._make_progress_frame(
-            "Step 1 of 2 — Group Identifier",
-            "Waiting for all participants to sign the group inception…",
+        self._round1_frame, self._round1_participants_layout = self._make_progress_frame(
+            "Step 1 of 2 — Group Identifier"
         )
         layout.addWidget(self._round1_frame)
         layout.addSpacing(12)
 
-        # Round 2 frame (dimmed until round 1 complete)
-        self._round2_frame = self._make_progress_frame(
-            "Step 2 of 2 — Registry",
-            "Will begin after group identifier is confirmed.",
+        self._round2_frame, self._round2_participants_layout = self._make_progress_frame(
+            "Step 2 of 2 — Registry"
         )
-        self._round2_status_label = self._round2_frame.findChild(QLabel, "status_label")
         layout.addWidget(self._round2_frame)
         layout.addSpacing(40)
 
-    def _make_progress_frame(self, title: str, status: str) -> QFrame:
+    def _make_progress_frame(self, title: str) -> tuple["QFrame", "QVBoxLayout"]:
         frame = QFrame()
         frame.setStyleSheet(
             f"QFrame {{ border: 1px solid {colors.BORDER}; border-radius: 8px; "
@@ -314,18 +344,21 @@ class WhisperSetupPage(LocksmithFormPage):
         frame.setFixedWidth(500)
         fl = QVBoxLayout(frame)
         fl.setContentsMargins(16, 16, 16, 16)
-        fl.setSpacing(8)
+        fl.setSpacing(4)
 
         title_lbl = QLabel(title)
-        title_lbl.setStyleSheet(f"font-weight: bold; font-size: 15px; color: {colors.TEXT_MENU};")
+        title_lbl.setStyleSheet(
+            f"font-weight: bold; font-size: 15px; color: {colors.TEXT_MENU};"
+        )
         fl.addWidget(title_lbl)
 
-        status_lbl = QLabel(status)
-        status_lbl.setObjectName("status_label")
-        status_lbl.setStyleSheet(f"font-size: 13px; color: {colors.TEXT_SUBTLE};")
-        status_lbl.setWordWrap(True)
-        fl.addWidget(status_lbl)
-        return frame
+        participants_container = QWidget()
+        participants_layout = QVBoxLayout(participants_container)
+        participants_layout.setContentsMargins(0, 0, 0, 0)
+        participants_layout.setSpacing(4)
+        fl.addWidget(participants_container)
+
+        return frame, participants_layout
 
     # ------------------------------------------------------------------
     # Shared helpers
@@ -393,13 +426,14 @@ class WhisperSetupPage(LocksmithFormPage):
                 pass
             self._poller = None
         self._weirwood_identifiers = []
+        self._round1_participant_labels: dict[str, "QLabel"] = {}
+        self._round2_participant_labels: dict[str, "QLabel"] = {}
 
         self._load_identifier_dropdown()
 
         state = self._get_init_state()
 
         if state.init_step >= 2:
-            # Restore the post-upload confirmation view for section 1.
             alias = state.chosen_identifier_alias
             hab = self.app.vault.hby.habByName(alias) if alias else None
             if hab:
@@ -409,28 +443,61 @@ class WhisperSetupPage(LocksmithFormPage):
 
         if state.init_step >= 3:
             self._section3.show()
-            if state.init_step == 3 and state.group_identifier_alias and not state.init_complete:
-                from keri.core import coring as _kc
-                _ghab = self.app.vault.hby.habByName(state.group_identifier_alias)
-                if _ghab is not None:
-                    _pfx = _kc.Prefixer(qb64=_ghab.pre)
-                    _seq = _kc.Seqner(sn=0)
-                    if self.app.vault.counselor.complete(_pfx, _seq):
-                        self._show_section4(state.group_identifier_alias, state.is_proposer)
-            self._populate_section3(state)
+            self._populate_section3(state)   # sets self-label; skips selector if locked
 
-        if state.init_step >= 4:
-            self._section4.show()
-            if not state.init_complete and state.group_identifier_alias:
-                if state.is_proposer:
+            # Determine whether section 4 should be visible
+        _show_s4 = state.init_step >= 4 or (state.init_step == 3 and state.section4_started)
+
+        if _show_s4 and state.group_identifier_alias:
+            smids = self._get_group_smids()
+            if smids:
+                # If counselor already complete but init_step not yet advanced, do it now
+                if state.init_step == 3 and state.section4_started:
+                    from keri.core import coring as _kc
+                    _ghab = self.app.vault.hby.habByName(state.group_identifier_alias)
+                    if _ghab is not None:
+                        _pfx = _kc.Prefixer(qb64=_ghab.pre)
+                        _seq = _kc.Seqner(sn=0)
+                        if self.app.vault.counselor.complete(_pfx, _seq):
+                            state.init_step = 4
+                            if not state.group_signed_aids:
+                                state.group_signed_aids = list(smids)
+                            self._save_init_state(state)
+
+                self._lock_section3(state, smids)
+                self._section4.show()
+
+                self._build_signing_rows(
+                    self._round1_participants_layout,
+                    self._round1_participant_labels,
+                    smids,
+                    state.group_signed_aids,
+                )
+                self._build_signing_rows(
+                    self._round2_participants_layout,
+                    self._round2_participant_labels,
+                    smids,
+                    state.registry_signed_aids,
+                )
+
+                if state.init_step >= 4 and not state.init_complete:
                     registry_name = f"{state.group_identifier_alias}-registry"
                     registry = self.app.vault.rgy.registryByName(registry_name)
-                    if registry is None:
+                    if registry is not None:
+                        _reg = vdr_credentialing.Registrar(
+                            hby=self.app.vault.hby,
+                            rgy=self.app.vault.rgy,
+                            counselor=self.app.vault.counselor,
+                        )
+                        if _reg.complete(pre=registry.regk, sn=0):
+                            self._on_init_complete(registry.regk)
+                        elif state.is_proposer:
+                            self._launch_create_registry_doer(state.group_identifier_alias)
+                        # else joiner: registry exists but not complete — waiting
+                    elif state.is_proposer:
                         self._launch_create_registry_doer(state.group_identifier_alias)
-                    else:
-                        # Registry exists but init_complete not written — mark done
-                        self._on_init_complete(registry.regk)
-                        # Joiner: waiting UI is shown; WeirwoodMessagePoller handles /multisig/vcp
+                    # else joiner at init_step==4 with no registry: waiting for /multisig/vcp
+                # else: init_step==3 + section4_started — WhisperCounselingCompletionDoer running
 
         # Reconnect doer event listener for the current vault.
         if self.app.vault and hasattr(self.app.vault, "signals"):
@@ -603,6 +670,13 @@ class WhisperSetupPage(LocksmithFormPage):
 
         # Rebuild participant selector from weirwood identifiers (excluding own)
         chosen_aid = hab.pre if hab else ""
+        # Always update self-identity labels
+        if hab:
+            self._s3_self_name_lbl.setText(f"{alias} (yours)" or "— (yours")
+            self._s3_self_aid_lbl.setText(chosen_aid or "—")
+        # Skip rebuilding selector if section 3 is already locked
+        if state.section4_started or state.init_step >= 4:
+            return
         items = [
             (i["alias"], {"aid": i["aid"], "alias": i["alias"], "oobi": i.get("oobi", "")})
             for i in self._weirwood_identifiers
@@ -678,35 +752,106 @@ class WhisperSetupPage(LocksmithFormPage):
     # ------------------------------------------------------------------
     # Section 4
     # ------------------------------------------------------------------
-    def _show_section4(self, group_alias: str, is_proposer: bool):
-        """Reveal section 4. Proposer launches CreateRegistryDoer; joiner waits."""
+
+    def _lock_section3(self, state: "WhisperInitState", smids: list[str]) -> None:
+        """Freeze all section 3 inputs and display frozen participant list."""
+        # Update header
+        if state.is_proposer:
+            self._s3_header_lbl.setText("Group Identifier Created")
+            self._s3_subtext_lbl.setText(
+                "The fields below reflect the parameters of the created group identifier."
+            )
+        else:
+            self._s3_header_lbl.setText("Group Identifier Joined")
+            self._s3_subtext_lbl.setText(
+                "The fields below reflect the parameters of the group identifier you joined."
+            )
+
+        # For joiner: populate fields from persisted state before disabling
+        if not state.is_proposer:
+            self._group_alias_field.setText(state.group_identifier_alias)
+            self._signing_threshold.setText(state.group_isith or "1")
+            self._rotation_threshold.setText(state.group_nsith or "1")
+            self._toad_field.setText(state.group_toad or "0")
+
+        # Disable all inputs
+        self._group_alias_field.setReadOnly(True)
+        self._signing_threshold.setReadOnly(True)
+        self._rotation_threshold.setReadOnly(True)
+        self._toad_field.setReadOnly(True)
+        self._create_group_button.hide()
+
+        # Hide interactive selector, show frozen list of other participants
+        self._participants_container.hide()
+        # Clear and rebuild frozen list
+        while self._s3_frozen_participants_layout.count():
+            item = self._s3_frozen_participants_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        own_aid = state.chosen_identifier_aid
+        others = [aid for aid in smids if aid != own_aid]
+
+        if len(others) > 4:
+            from PySide6.QtWidgets import QScrollArea
+            scroll = QScrollArea()
+            scroll.setMaximumHeight(260)   # ~4 rows
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            container = QWidget()
+            c_layout = QVBoxLayout(container)
+            c_layout.setContentsMargins(0, 0, 0, 0)
+            c_layout.setSpacing(0)
+            for aid in others:
+                c_layout.addWidget(self._make_participant_label_row(aid))
+            scroll.setWidget(container)
+            self._s3_frozen_participants_layout.addWidget(scroll)
+        else:
+            for aid in others:
+                self._s3_frozen_participants_layout.addWidget(self._make_participant_label_row(aid))
+
+        self._s3_frozen_participants_widget.show()
+
+
+    def _reveal_section4_waiting(
+            self, group_alias: str, smids: list[str], is_proposer: bool, data: dict
+    ) -> None:
+        """Show section 4 before group inception is complete. Lock section 3."""
         state = self._get_init_state()
         state.group_identifier_alias = group_alias
         state.is_proposer = is_proposer
-        state.init_step = 4
+        state.section4_started = True
+        state.group_isith = data.get("isith", "1")
+        state.group_nsith = data.get("nsith", "1")
+        state.group_toad = data.get("toad", "0")
+
+        # Proposer's own AID signs first
+        if is_proposer:
+            own_aid = state.chosen_identifier_aid
+            if own_aid and own_aid not in state.group_signed_aids:
+                state.group_signed_aids.append(own_aid)
+
         self._save_init_state(state)
+        self._lock_section3(state, smids)
 
         self._section4.show()
         self._scroll_to_bottom()
 
-        r1 = self._round1_frame.findChild(QLabel, "status_label")
-        if is_proposer:
-            if r1:
-                r1.setStyleSheet(f"font-size: 13px; color: {colors.SUCCESS};")
-            if self._round2_status_label:
-                self._round2_status_label.setText(
-                    "Waiting for all participants to confirm registry creation…"
-                )
-            self._launch_create_registry_doer(group_alias)
-        else:
-            if r1:
-                r1.setText("✓ Group identifier joined")
-                r1.setStyleSheet(f"font-size: 13px; color: {colors.SUCCESS};")
-            if self._round2_status_label:
-                self._round2_status_label.setText(
-                    "Waiting for registry proposal from group creator…"
-                )
-
+        # Build Round 1 rows (own ✓ for proposer, all ○ for joiner)
+        self._build_signing_rows(
+            self._round1_participants_layout,
+            self._round1_participant_labels,
+            smids,
+            state.group_signed_aids,
+        )
+        # Build Round 2 rows (all ○)
+        self._build_signing_rows(
+            self._round2_participants_layout,
+            self._round2_participant_labels,
+            smids,
+            [],
+        )
     def _launch_create_registry_doer(self, group_alias: str):
         """Launch CreateRegistryDoer for the given group alias."""
         weirwood_cfg = self.app.config.plugin_configs.get("whisper", {})
@@ -727,34 +872,112 @@ class WhisperSetupPage(LocksmithFormPage):
     # ------------------------------------------------------------------
 
     def _on_doer_event(self, doer_name: str, event_type: str, data: dict):
+        # ---- WhisperGroupMultisigInceptDoer ----
         if doer_name == "WhisperGroupMultisigInceptDoer":
-            if event_type == "group_identifier_created":
-                self._show_section4(data.get("alias", ""), is_proposer=True)
+            if event_type == "group_inception_exn_sent":
+                smids = data.get("smids", [])
+                alias = data.get("alias", "")
+                if smids and alias:
+                    self._reveal_section4_waiting(alias, smids, is_proposer=True, data=data)
+
+            elif event_type == "group_participant_signed":
+                signer_aid = data.get("signer_aid", "")
+                if signer_aid:
+                    self._update_signing_row(self._round1_participant_labels, signer_aid, signed=True)
+
+            elif event_type == "group_identifier_created":
+                state = self._get_init_state()
+                state.init_step = 4
+                smids = self._get_group_smids()
+                # Mark all Round 1 as confirmed
+                for aid in smids:
+                    self._update_signing_row(self._round1_participant_labels, aid, signed=True)
+                state.group_signed_aids = list(smids)
+                # Proposer's own AID begins registry signing
+                own_aid = state.chosen_identifier_aid
+                if own_aid and own_aid not in state.registry_signed_aids:
+                    state.registry_signed_aids.append(own_aid)
+                self._save_init_state(state)
+                # Flip proposer's Round 2 row to signed
+                self._update_signing_row(self._round2_participant_labels, own_aid, signed=True)
+                self._launch_create_registry_doer(data.get("alias", ""))
+
             elif event_type == "group_inception_failed":
-                self._create_group_button.setEnabled(True)
-                self._create_group_button.setText("Create Group Identifier")
+                state = self._get_init_state()
+                if not state.section4_started:
+                    # Section 4 was never revealed — restore create button
+                    self._create_group_button.setEnabled(True)
+                    self._create_group_button.setText("Create Group Identifier")
+                    self._create_group_button.show()
                 self.show_error(f"Group creation failed: {data.get('error')}")
-            elif event_type == "group_inception_exn_sent":
-                self._create_group_button.setText("Waiting for participants…")
 
+        # ---- WhisperMultisigJoinDoer ----
         elif doer_name == "WhisperMultisigJoinDoer":
-            if event_type == "group_identifier_joined":
-                self._show_section4(data.get("alias", ""), is_proposer=False)
+            if event_type == "group_join_waiting":
+                smids = data.get("smids", [])
+                alias = data.get("alias", "")
+                if smids and alias:
+                    self._reveal_section4_waiting(alias, smids, is_proposer=False, data=data)
 
-        elif doer_name == "WhisperRegistryAcceptDoer":
-            if event_type == "registry_accepted":
-                self._on_init_complete(data.get("regk", ""))
+            elif event_type == "group_identifier_joined":
+                state = self._get_init_state()
+                state.init_step = 4
+                smids = self._get_group_smids()
+                for aid in smids:
+                    self._update_signing_row(self._round1_participant_labels, aid, signed=True)
+                state.group_signed_aids = list(smids)
+                self._save_init_state(state)
+                # Round 2 stays all-pending; joiner waits for registry proposal
 
+            elif event_type == "group_join_failed":
+                state = self._get_init_state()
+                if not state.section4_started:
+                    self._create_group_button.setEnabled(True)
+                    self._create_group_button.setText("Create Group Identifier")
+                    self._create_group_button.show()
+                self.show_error(f"Group join failed: {data.get('error')}")
+
+        # ---- CreateRegistryDoer ----
         elif doer_name == "CreateRegistryDoer":
-            if event_type == "registry_created":
-                if self._round2_status_label:
-                    self._round2_status_label.setText("✓ Registry created")
-                    self._round2_status_label.setStyleSheet(
-                        f"font-size: 13px; color: {colors.SUCCESS};"
-                    )
+            if event_type == "registry_participant_signed":
+                signer_aid = data.get("signer_aid", "")
+                if signer_aid:
+                    self._update_signing_row(self._round2_participant_labels, signer_aid, signed=True)
+
+            elif event_type == "registry_created":
+                smids = self._get_group_smids()
+                for aid in smids:
+                    self._update_signing_row(self._round2_participant_labels, aid, signed=True)
+                state = self._get_init_state()
+                state.registry_signed_aids = list(smids)
+                self._save_init_state(state)
                 self._on_init_complete(data.get("regk", ""))
+
             elif event_type == "registry_creation_failed":
                 self.show_error(f"Registry creation failed: {data.get('error')}")
+
+        # ---- WhisperRegistryAcceptDoer ----
+        elif doer_name == "WhisperRegistryAcceptDoer":
+            if event_type == "registry_accept_waiting":
+                own_aid = data.get("own_aid", "")
+                if own_aid:
+                    state = self._get_init_state()
+                    if own_aid not in state.registry_signed_aids:
+                        state.registry_signed_aids.append(own_aid)
+                        self._save_init_state(state)
+                    self._update_signing_row(self._round2_participant_labels, own_aid, signed=True)
+
+            elif event_type == "registry_accepted":
+                smids = self._get_group_smids()
+                for aid in smids:
+                    self._update_signing_row(self._round2_participant_labels, aid, signed=True)
+                state = self._get_init_state()
+                state.registry_signed_aids = list(smids)
+                self._save_init_state(state)
+                self._on_init_complete(data.get("regk", ""))
+
+            elif event_type == "registry_accept_failed":
+                self.show_error(f"Registry acceptance failed: {data.get('error')}")
 
     def _on_init_complete(self, regk: str):
         """Mark initialization as complete and navigate to issued credentials."""
@@ -774,3 +997,80 @@ class WhisperSetupPage(LocksmithFormPage):
         vault_page = getattr(self.app, "_vault_page", None)
         if vault_page and hasattr(vault_page, "_show_page"):
             vault_page._show_page("whisper_issued_credentials")
+
+    def _resolve_aid_alias(self, aid: str) -> str:
+        hab = self.app.vault.hby.habs.get(aid)
+        if hab:
+            return hab.name
+        contact = self.app.vault.org.get(aid)
+        if contact:
+            return contact.get("alias", "")
+        return ""
+
+    def _get_group_smids(self) -> list[str]:
+        state = self._get_init_state()
+        if not state.group_identifier_alias:
+            return []
+        ghab = self.app.vault.hby.habByName(state.group_identifier_alias)
+        if ghab is None:
+            return []
+        return list(self.app.vault.hby.db.signingMembers(pre=ghab.pre))
+
+    def _build_signing_rows(
+            self,
+            participants_layout: "QVBoxLayout",
+            participant_labels_dict: dict,
+            smids: list[str],
+            signed_aids: list[str],
+    ) -> None:
+        """Clear and rebuild participant signing rows into participants_layout."""
+        # Clear existing rows
+        while participants_layout.count():
+            item = participants_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        participant_labels_dict.clear()
+
+        for aid in smids:
+            signed = aid in signed_aids
+            alias = self._resolve_aid_alias(aid)
+            text = f"{'✓ ' if signed else '○ '}{alias} — {aid}" if alias else f"{'✓ ' if signed else '○ '}{aid}"
+            lbl = QLabel(text)
+            # lbl.setWordWrap(True)
+            lbl.setStyleSheet(
+                f"font-size: 13px; color: {colors.SUCCESS if signed else colors.TEXT_SUBTLE}; border: none;"
+            )
+            participants_layout.addWidget(lbl)
+            participant_labels_dict[aid] = lbl
+
+    def _update_signing_row(
+            self, participant_labels_dict: dict, aid: str, signed: bool
+    ) -> None:
+        lbl = participant_labels_dict.get(aid)
+        if lbl is None:
+            return
+        alias = self._resolve_aid_alias(aid)
+        prefix = "✓ " if signed else "○ "
+        lbl.setText(f"{prefix}{alias} — {aid}" if alias else f"{prefix}{aid}")
+        lbl.setStyleSheet(
+            f"font-size: 13px; color: {colors.SUCCESS if signed else colors.TEXT_SUBTLE}; border: none;"
+        )
+
+    def _make_participant_label_row(self, aid: str) -> "QWidget":
+        """Two-label row (name bold 15px / AID monospace 11px) for frozen s3 display."""
+        alias = self._resolve_aid_alias(aid)
+        widget = QWidget()
+        vbox = QVBoxLayout(widget)
+        vbox.setContentsMargins(8, 8, 0, 6)
+        vbox.setSpacing(2)
+        name_lbl = QLabel(alias if alias else aid[:24] + "…")
+        name_lbl.setStyleSheet(
+            f"font-size: 15px; font-weight: 600; color: {colors.TEXT_MENU};"
+        )
+        aid_lbl = QLabel(aid)
+        aid_lbl.setStyleSheet(
+            f"font-size: 11px; color: {colors.TEXT_SUBTLE}; font-family: {get_monospace_font_family()};"
+        )
+        vbox.addWidget(name_lbl)
+        vbox.addWidget(aid_lbl)
+        return widget

@@ -302,7 +302,8 @@ class WhisperGroupMultisigInceptDoer(doing.DoDoer):
             if self.signal_bridge:
                 self.signal_bridge.emit_doer_event(
                     "WhisperGroupMultisigInceptDoer", "group_inception_exn_sent",
-                    {"alias": self.alias, "pre": ghab.pre, "recipients": others},
+                    {"alias": self.alias, "pre": ghab.pre, "recipients": others,
+                     "smids": self.smids, "isith": str(self.isith), "nsith": str(self.nsith), "toad": str(self.toad)}
                 )
 
             prefixer = coring.Prefixer(qb64=ghab.pre)
@@ -419,6 +420,9 @@ class WhisperMultisigJoinDoer(doing.DoDoer):
                     _s = _db.whisperInitState.get(keys=("init",)) or WhisperInitState()
                     _s.group_identifier_alias = self.alias
                     _s.is_proposer = False
+                    _s.group_isith = str(inits["isith"])
+                    _s.group_nsith = str(inits["nsith"])
+                    _s.group_toad = str(inits["toad"])
                     _db.whisperInitState.pin(keys=("init",), val=_s)
             except Exception:
                 pass
@@ -442,10 +446,13 @@ class WhisperMultisigJoinDoer(doing.DoDoer):
             saider = coring.Saider(qb64=own_serder.said)
             self.counselor.start(ghab=ghab, prefixer=prefixer, seqner=seqner, saider=saider)
 
+            _smids = list(self.hby.db.signingMembers(pre=ghab.pre))
+
             if self.signal_bridge:
                 self.signal_bridge.emit_doer_event(
                     "WhisperMultisigJoinDoer", "group_join_waiting",
-                    {"alias": self.alias, "pre": ghab.pre},
+                    {"alias": self.alias, "pre": ghab.pre, "smids": _smids,
+                     "isith": str(inits["isith"]), "nsith": str(inits["nsith"]), "toad": str(inits["toad"])},
                 )
 
             while not self.counselor.complete(prefixer, seqner):
@@ -699,7 +706,7 @@ class WhisperRegistryAcceptDoer(doing.DoDoer):
             if self.signal_bridge:
                 self.signal_bridge.emit_doer_event(
                     "WhisperRegistryAcceptDoer", "registry_accept_waiting",
-                    {"regk": registry.regk},
+                    {"regk": registry.regk, "own_aid": self.mhab.pre},
                 )
 
             # Poll for completion (registrar escrow loop runs via self.extend above)
