@@ -507,6 +507,7 @@ async def post_message(
     topic: str,
     raw: bytes,
     sender_aid: Optional[str] = None,
+    multisig_alias: str = ""
 ) -> Dict[str, Any]:
     """
     POST a CESR-encoded message to weirwood /messages.
@@ -530,6 +531,8 @@ async def post_message(
             f"&sender={urllib.parse.quote(sender_aid, safe='')}"
             f"&topic={urllib.parse.quote(topic, safe='')}"
         )
+        if multisig_alias:
+            params += f"&multisig_alias={urllib.parse.quote(multisig_alias, safe='')}"
         response = await essr.request(
             path=f"/messages?{params}",
             method="POST",

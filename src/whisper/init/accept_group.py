@@ -49,10 +49,11 @@ class AcceptGroupProposalDialog(LocksmithDialog):
     """
 
     def __init__(self, app: "LocksmithApplication", parent: "VaultPage",
-                 proposal_said: str):
+                 proposal_said: str, multisig_alias: str = ""):
         self.app = app
         self.parent_widget = parent
         self.proposal_said = proposal_said
+        self.multisig_alias = multisig_alias
 
         try:
             self._load_proposal()
@@ -164,12 +165,18 @@ class AcceptGroupProposalDialog(LocksmithDialog):
         self._add_section_label(layout, "Select Your Identifier")
 
         alias_note = QLabel("Choose a local name for this group identifier.")
+        if self.multisig_alias:
+            alias_note.setText("Alias is set by the proposer:")
+
         alias_note.setStyleSheet(f"color: {colors.TEXT_SUBTLE}; font-size: 13px;")
         alias_note.setWordWrap(True)
         alias_note.setFixedWidth(420)
         layout.addWidget(alias_note)
 
         self.group_alias_field = FloatingLabelLineEdit("Group Identifier Alias")
+        self.group_alias_field.setText(self.multisig_alias or "")
+        if self.multisig_alias:
+            self.group_alias_field.setEnabled(False)
         self.group_alias_field.setFixedWidth(420)
         layout.addWidget(self.group_alias_field)
 
@@ -253,7 +260,10 @@ class AcceptGroupProposalDialog(LocksmithDialog):
         mhab_data = self.local_id_dropdown.currentData()
         if not mhab_data:
             return
-        alias = self.group_alias_field.text().strip()
+        if self.multisig_alias:
+            alias = self.multisig_alias
+        else:
+            alias = self.group_alias_field.text().strip()
         if not alias:
             return
         mhab = self.app.vault.hby.habByName(mhab_data["alias"])
@@ -282,7 +292,7 @@ class AcceptGroupProposalDialog(LocksmithDialog):
     def _on_doer_event(self, doer_name: str, event_type: str, data: dict):
         if doer_name != "WhisperMultisigJoinDoer":
             return
-        if event_type == "group_identifier_joined":
+        if event_type == "group_join_waiting":
             self.close()
         elif event_type == "group_join_failed":
             self.join_button.setEnabled(True)

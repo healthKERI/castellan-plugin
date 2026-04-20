@@ -38,7 +38,6 @@ from keri import help
 logger = help.ogler.getLogger(__name__)
 
 _TOPIC_MULTISIG = "multisig"
-_REGISTRY_POLL_TIMEOUT = 60.0
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +166,8 @@ class WeirwoodMessagePoller(doing.Doer):
 
         self.exc.processEscrow()
 
+        self._drain_cues(pending_alias="")
+
         parser = parsing.Parser(
             kvy=self.app.vault.hby.kvy,
             rvy=self.app.vault.hby.rvy,
@@ -182,14 +183,13 @@ class WeirwoodMessagePoller(doing.Doer):
                 raw = raw_str.encode("utf-8") if isinstance(raw_str, str) else raw_str
                 parser.parse(ims=bytearray(raw), local=False)
                 await remoting.mark_message_read(self.app, msg["id"])
+                alias = msg.get("multisig_alias", "")
+                self._drain_cues(pending_alias=alias)
             except Exception as e:
                 logger.warning(f"Failed to process message {msg.get('id')}: {e}")
 
-        # Drain the dedicated exchanger's cues and emit Qt signals
-        # so the plugin UI can react (e.g. open the join dialog).
-        self._drain_cues()
 
-    def _drain_cues(self):
+    def _drain_cues(self, pending_alias: str = ""):
         """Convert exchanger cues into new_notification Qt signals."""
         while self.exc.cues:
             cue = self.exc.cues.popleft()
@@ -210,7 +210,7 @@ class WeirwoodMessagePoller(doing.Doer):
 
                 signals = getattr(self.app.vault, "signals", None)
                 if signals and hasattr(signals, "new_notification"):
-                    signals.new_notification.emit({"r": route, "d": said})
+                    signals.new_notification.emit({"r": route, "d": said, "multisig_alias": pending_alias})
 
             elif kin == "query":
                 # The exchanger couldn't find the sender's key state.
@@ -265,6 +265,11 @@ class WhisperGroupMultisigInceptDoer(doing.DoDoer):
                     "WhisperGroupMultisigInceptDoer", "group_inception_started",
                     {"alias": self.alias, "smids": self.smids},
                 )
+                self.signal_bridge.emit_doer_event(
+                    "GroupMultisigInceptDoer",
+                    "group_inception_started",
+                    {"alias": self.alias, "smids": self.smids}
+                )
 
             self.app.vault.plugin_state.setdefault("whisper", {})["group_join_tracker"] = set()
 
@@ -295,7 +300,8 @@ class WhisperGroupMultisigInceptDoer(doing.DoDoer):
             others = [pre for pre in self.smids if pre != self.mhab.pre]
             for recpt in others:
                 asyncio.get_event_loop().create_task(
-                    remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw, sender_aid=self.mhab.pre)
+                    remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw, sender_aid=self.mhab.pre,
+                                          multisig_alias=self.alias)
                 )
                 logger.info(f"Queued weirwood icp EXN for {recpt[:16]}...")
 
@@ -316,6 +322,10 @@ class WhisperGroupMultisigInceptDoer(doing.DoDoer):
                     "WhisperGroupMultisigInceptDoer", "group_inception_waiting",
                     {"alias": self.alias, "pre": ghab.pre},
                 )
+                self.signal_bridge.emit_doer_event(
+                    "GroupMultisigInceptDoer", "group_inception_waiting",
+                    {"alias": self.alias, "pre": ghab.pre}
+                )
 
             while not self.counselor.complete(prefixer, seqner):
                 yield self.tock
@@ -335,6 +345,11 @@ class WhisperGroupMultisigInceptDoer(doing.DoDoer):
                 self.signal_bridge.emit_doer_event(
                     "WhisperGroupMultisigInceptDoer", "group_identifier_created",
                     {"alias": self.alias, "pre": ghab.pre, "success": True},
+                )
+                self.signal_bridge.emit_doer_event(
+                    "GroupMultisigInceptDoer",
+                    "group_identifier_created",
+                    {"alias": self.alias, "pre": ghab.pre, "success": True}
                 )
 
         except Exception as e:
@@ -454,6 +469,12 @@ class WhisperMultisigJoinDoer(doing.DoDoer):
                     {"alias": self.alias, "pre": ghab.pre, "smids": _smids,
                      "isith": str(inits["isith"]), "nsith": str(inits["nsith"]), "toad": str(inits["toad"])},
                 )
+                self.signal_bridge.emit_doer_event(
+                    "MultisigJoinDoer",
+                    "group_join_waiting",
+                    {"alias": self.alias, "pre": ghab.pre, "smids": _smids,
+                     "isith": str(inits["isith"]), "nsith": str(inits["nsith"]), "toad": str(inits["toad"])},
+                )
 
             while not self.counselor.complete(prefixer, seqner):
                 yield self.tock
@@ -463,6 +484,10 @@ class WhisperMultisigJoinDoer(doing.DoDoer):
                 self.signal_bridge.emit_doer_event(
                     "WhisperMultisigJoinDoer", "group_identifier_joined",
                     {"alias": self.alias, "pre": ghab.pre, "success": True},
+                )
+                self.signal_bridge.emit_doer_event(
+                    "MultisigJoinDoer", "group_identifier_joined",
+                    {"alias": self.alias, "pre": ghab.pre, "success": True}
                 )
 
         except Exception as e:
@@ -511,71 +536,79 @@ class CreateRegistryDoer(doing.DoDoer):
             hab = self.hby.habByName(self.hab_alias)
             if hab is None:
                 raise ValueError(f"Identifier '{self.hab_alias}' not found")
-            if self.rgy.registryByName(self.registry_name) is not None:
-                raise ValueError(f"Registry '{self.registry_name}' already exists")
 
-            registry = self.rgy.makeRegistry(
-                name=self.registry_name,
-                prefix=hab.pre,
-                noBackers=False,
-                baks=[self.weirwood_aid],
-                toad=1,
-                nonce=coring.randomNonce(),
-            )
+            existing_registry = self.rgy.registryByName(self.registry_name)
 
-            regd = getattr(registry, "regd", registry.regk)
-            rseal = {"i": registry.regk, "s": "0", "d": regd}
-            anc = hab.interact(data=[rseal])
-            aserder = serdering.SerderKERI(raw=bytes(anc))
-
-            registrar = vdr_credentialing.Registrar(
-                hby=self.hby, rgy=self.rgy, counselor=self.counselor
-            )
-            self.extend([registrar])
-            registrar.incept(iserder=registry.vcp, anc=aserder)
-
-            if self.signal_bridge:
-                self.signal_bridge.emit_doer_event(
-                    "CreateRegistryDoer", "registry_inception_started",
-                    {"name": self.registry_name, "regk": registry.regk},
+            if existing_registry is not None:
+                # Restart path: registry was persisted in a prior session.
+                # Skip creation and IXN; go straight to completion polling.
+                registry = existing_registry
+                registrar = vdr_credentialing.Registrar(
+                    hby=self.hby, rgy=self.rgy, counselor=self.counselor
+                )
+                self.extend([registrar])
+                logger.info(
+                    f"CreateRegistryDoer: '{self.registry_name}' already exists "
+                    f"— resuming completion wait"
+                )
+            else:
+                # Fresh creation path
+                registry = self.rgy.makeRegistry(
+                    name=self.registry_name,
+                    prefix=hab.pre,
+                    noBackers=False,
+                    baks=[self.weirwood_aid],
+                    toad=1,
+                    nonce=coring.randomNonce(),
                 )
 
-            # For GroupHab: broadcast /multisig/vcp EXN via weirwood
-            if isinstance(hab, GroupHab):
-                try:
-                    exn, atc = keri_grouping.multisigRegistryInceptExn(
-                        ghab=hab,
-                        vcp=registry.vcp.raw,
-                        anc=anc,
-                        usage=f"Registry: {self.registry_name}",
-                    )
-                    raw = bytes(exn.raw) + bytes(atc)
-                    smids = self.hby.db.signingMembers(pre=hab.pre)
-                    others = [pre for pre in smids if pre != hab.mhab.pre]
-                    for recpt in others:
-                        asyncio.get_event_loop().create_task(
-                            remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw, sender_aid=hab.mhab.pre)
-                        )
-                        logger.info(f"Queued weirwood vcp EXN for {recpt[:16]}...")
-                except Exception as e:
-                    logger.warning(f"Failed to send /multisig/vcp EXN: {e}")
+                regd = getattr(registry, "regd", registry.regk)
+                rseal = {"i": registry.regk, "s": "0", "d": regd}
+                anc = hab.interact(data=[rseal])
+                aserder = serdering.SerderKERI(raw=bytes(anc))
 
-            # Poll for completion (counselor coordinates group ixn signatures;
-            # registrar escrow loop runs as a sub-doer via self.extend above)
-            deadline = self.app.vault.tymth() + _REGISTRY_POLL_TIMEOUT
-            while True:
-                self.rgy.processEscrows()
-                if registrar.complete(pre=registry.regk, sn=0):
-                    break
-                if self.app.vault.tymth() > deadline:
-                    raise RuntimeError(
-                        f"Registry '{self.registry_name}' timed out after {_REGISTRY_POLL_TIMEOUT}s"
+                registrar = vdr_credentialing.Registrar(
+                    hby=self.hby, rgy=self.rgy, counselor=self.counselor
+                )
+                self.extend([registrar])
+                registrar.incept(iserder=registry.vcp, anc=aserder)
+
+                if self.signal_bridge:
+                    self.signal_bridge.emit_doer_event(
+                        "CreateRegistryDoer", "registry_inception_started",
+                        {"name": self.registry_name, "regk": registry.regk},
                     )
+
+                # For GroupHab: broadcast /multisig/vcp EXN via weirwood
+                if isinstance(hab, GroupHab):
+                    try:
+                        exn, atc = keri_grouping.multisigRegistryInceptExn(
+                            ghab=hab,
+                            vcp=registry.vcp.raw,
+                            anc=anc,
+                            usage=f"Registry: {self.registry_name}",
+                        )
+                        raw = bytes(exn.raw) + bytes(atc)
+                        smids = self.hby.db.signingMembers(pre=hab.pre)
+                        others = [pre for pre in smids if pre != hab.mhab.pre]
+                        for recpt in others:
+                            asyncio.get_event_loop().create_task(
+                                remoting.post_message(
+                                    self.app, recpt, _TOPIC_MULTISIG, raw,
+                                    sender_aid=hab.mhab.pre,
+                                )
+                            )
+                            logger.info(f"Queued weirwood vcp EXN for {recpt[:16]}...")
+                    except Exception as e:
+                        logger.warning(f"Failed to send /multisig/vcp EXN: {e}")
+
+            # Shared completion path (both fresh and restart)
+            while not registrar.complete(pre=registry.regk, sn=0):
+                self.rgy.processEscrows()
                 yield self.tock
 
             self.remove([registrar])
 
-            # POST vcp to weirwood registrar
             asyncio.get_event_loop().create_task(
                 remoting.post_tel_event(self.app, bytes(registry.vcp.raw))
             )
@@ -584,11 +617,11 @@ class CreateRegistryDoer(doing.DoDoer):
             if self.signal_bridge:
                 self.signal_bridge.emit_doer_event(
                     "CreateRegistryDoer", "registry_created",
-                    {
-                        "name": self.registry_name,
-                        "regk": registry.regk,
-                        "success": True,
-                    },
+                    {"name": self.registry_name, "regk": registry.regk, "success": True},
+                )
+                self.signal_bridge.emit_doer_event(
+                    "InteractDoer", "interaction_complete",
+                    {"alias": self.hab_alias, "pre": hab.pre},
                 )
 
         except Exception as e:
@@ -655,20 +688,20 @@ class WhisperRegistryAcceptDoer(doing.DoDoer):
             # inception escrow.
             _inc_prefixer = coring.Prefixer(qb64=ghab.pre)
             _inc_seqner = coring.Seqner(sn=0)
-            _inc_deadline = self.app.vault.tymth() + _REGISTRY_POLL_TIMEOUT
+
             while not self.counselor.complete(_inc_prefixer, _inc_seqner):
-                if self.app.vault.tymth() > _inc_deadline:
-                    raise RuntimeError(
-                        f"Timed out waiting for group inception to finalize: {ghab.pre[:16]}..."
-                    )
                 yield self.tock
 
             if ghab is None:
                 raise ValueError(f"Group hab not found for gid {gid[:16]}...")
 
+            usage = payload.get("usage", "")
+            _reg_name = usage.removeprefix("Registry: ") if usage.startswith("Registry: ") else (
+                vcp_serder.ked.get("i", self.proposal_said[:16]))
+
             # Create registry locally with same parameters
             registry = self.rgy.makeRegistry(
-                name=vcp_serder.ked.get("i", self.proposal_said[:16]),
+                name=_reg_name,
                 prefix=ghab.pre,
                 noBackers=False,
                 baks=vcp_serder.ked.get("b", []),
@@ -709,14 +742,8 @@ class WhisperRegistryAcceptDoer(doing.DoDoer):
                     {"regk": registry.regk, "own_aid": self.mhab.pre},
                 )
 
-            # Poll for completion (registrar escrow loop runs via self.extend above)
-            deadline = self.app.vault.tymth() + _REGISTRY_POLL_TIMEOUT
-            while True:
+            while not registrar.complete(pre=registry.regk, sn=0):
                 self.rgy.processEscrows()
-                if registrar.complete(pre=registry.regk, sn=0):
-                    break
-                if self.app.vault.tymth() > deadline:
-                    raise RuntimeError("Registry acceptance timed out")
                 yield self.tock
 
             self.remove([registrar])
@@ -784,12 +811,64 @@ class WhisperCounselingCompletionDoer(doing.DoDoer):
                     "WhisperGroupMultisigInceptDoer", "group_identifier_created",
                     {"alias": self.ghab.name, "pre": self.ghab.pre, "success": True},
                 )
+                signals.emit_doer_event(
+                    "GroupMultisigInceptDoer","group_identifier_created",
+                    {"alias": self.ghab.name, "pre": self.ghab.pre, "success": True}
+                )
             else:
                 signals.emit_doer_event(
                     "WhisperMultisigJoinDoer", "group_identifier_joined",
                     {"alias": self.ghab.name, "pre": self.ghab.pre, "success": True},
                 )
+                signals.emit_doer_event(
+                    "MultisigJoinDoer", "group_identifier_joined",
+                    {"alias": self.ghab.name, "pre": self.ghab.pre, "success": True})
 
+        try:
+            self.app.vault.remove([self])
+        except Exception:
+            pass
+        return
+
+class WhisperRegistryAcceptCompletionDoer(doing.DoDoer):
+    """Resumes waiting for registry acceptance completion after vault restart (joiner)."""
+    def __init__(self, app, registry, signal_bridge=None):
+        self.app = app
+        self.registry = registry
+        self.rgy = app.vault.rgy
+        self.counselor = app.vault.counselor
+        self.signal_bridge = signal_bridge
+        super().__init__(doers=[doing.doify(self.complete_do)])
+
+    def complete_do(self, tymth, tock=0.0, **opts):
+        self.wind(tymth); self.tock = tock
+        _ = (yield self.tock)
+        registrar = vdr_credentialing.Registrar(hby=self.app.vault.hby, rgy=self.rgy, counselor=self.counselor)
+        self.extend([registrar])
+        while not registrar.complete(pre=self.registry.regk, sn=0):
+            self.rgy.processEscrows()
+            yield self.tock
+        self.remove([registrar])
+        if self.registry.vcp is not None:
+            vcp_raw = bytes(self.registry.vcp.raw)
+        else:
+            regk = self.registry.regk
+            dig = self.rgy.reger.getTel(snKey(pre=regk, sn=0))
+            raw = self.rgy.reger.getTvt(dgKey(pre=regk, dig=bytes(dig)))
+            if raw is None:
+                raise RuntimeError(
+                    f"Cannot retrieve vcp inception event for registry {regk}"
+                )
+            vcp_raw = bytes(raw)
+        asyncio.get_event_loop().create_task(
+            remoting.post_tel_event(self.app, vcp_raw)
+        )
+        signals = getattr(self.app.vault, "signals", None)
+        if signals:
+            signals.emit_doer_event(
+                "WhisperRegistryAcceptDoer", "registry_accepted",
+                {"regk": self.registry.regk, "success": True},
+            )
         try:
             self.app.vault.remove([self])
         except Exception:

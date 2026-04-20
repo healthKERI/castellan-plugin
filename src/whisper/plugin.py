@@ -52,6 +52,8 @@ class WhisperPlugin(
         self._pages: dict[str, QWidget] = {}
         self._build_pages(app)
         self._build_menu()
+        self._open_group_dialog_gid: str | None = None
+        self._open_registry_dialog_gid: str | None = None
 
     def _build_pages(self, app: "LocksmithApplication") -> None:
         """Instantiate all Whisper page widgets."""
@@ -103,10 +105,10 @@ class WhisperPlugin(
         items.append(MenuSpacer(15))
 
         nav_buttons_config = [
-            (":/assets/material-icons/passport.svg", "Initialization", "whisper_setup"),
-            (":/assets/material-icons/settings.svg", "Settings", "whisper_settings"),
             (":/assets/material-icons/out-badge.svg", "Issued Credentials", "whisper_issued_credentials"),
             (":/assets/material-icons/in-badge.svg", "Received Credentials", "whisper_received_credentials"),
+            (":/assets/material-icons/passport.svg", "Initialization", "whisper_setup"),
+            (":/assets/material-icons/settings.svg", "Settings", "whisper_settings"),
         ]
 
         self._nav_buttons_by_page = {}
@@ -247,6 +249,30 @@ class WhisperPlugin(
                     )
                     break
 
+        if (
+                _init_state is not None
+                and _init_state.init_step >= 4
+                and not _init_state.init_complete
+                and not _init_state.is_proposer
+                and _init_state.group_identifier_alias
+        ):
+            _registry_name = f"{_init_state.group_identifier_alias}-registry"
+            _registry = vault.rgy.registryByName(_registry_name)
+            if _registry is not None:
+                from keri.vdr import credentialing as _vdr
+                _reg_check = _vdr.Registrar(hby=vault.hby, rgy=vault.rgy, counselor=vault.counselor)
+                if not _reg_check.complete(pre=_registry.regk, sn=0):
+                    from .init.doers import WhisperRegistryAcceptCompletionDoer
+                    _reg_doer = WhisperRegistryAcceptCompletionDoer(
+                        app=self._app,
+                        registry=_registry,
+                        signal_bridge=vault.signals,
+                    )
+                    vault.extend([_reg_doer])
+                    logger.info(
+                        f"Whisper: resuming registry acceptance for "
+                        f"'{_init_state.group_identifier_alias}' (joiner)"
+                    )
 
     def on_vault_closed(self, vault: "Vault") -> None:
         if hasattr(vault, 'signals') and vault.signals:
@@ -259,7 +285,11 @@ class WhisperPlugin(
                     vault.signals.new_notification.disconnect(self._on_new_notification)
                 except (RuntimeError, TypeError):
                     pass
+
+        self._open_group_dialog_gid = None
+        self._open_registry_dialog_gid = None
         vault.plugin_state.pop("whisper", None)
+
         if self._db:
             self._db.close()
             self._db = None
@@ -279,6 +309,8 @@ class WhisperPlugin(
                 # co-signer response to our own proposal (group hab already exists).
                 _is_response = False
                 _exn = self._app.vault.hby.db.exns.get(keys=(said,))
+                _gid = ""
+
                 if _exn is not None:
                     _icp_sad = _exn.ked.get("e", {}).get("icp", {})
                     _gid = _icp_sad.get("i", "") if isinstance(_icp_sad, dict) else ""
@@ -303,16 +335,25 @@ class WhisperPlugin(
                                     {"signer_aid": _sender}
                                 )
                 if not _is_response:
+                    if not _gid or self._open_group_dialog_gid == _gid:
+                        return
+                    multisig_alias = notification.get("multisig_alias", "")
                     from .init.accept_group import AcceptGroupProposalDialog
                     dialog = AcceptGroupProposalDialog(
-                        app=self._app,
-                        parent=vault_page,
-                        proposal_said=said,
+                        app=self._app, parent=vault_page, proposal_said=said,
+                        multisig_alias=multisig_alias,
                     )
+                    self._open_group_dialog_gid = _gid
+                    def _clear_group_dialog():
+                        self._open_group_dialog_gid = None
+                    dialog.finished.connect(_clear_group_dialog)
                     dialog.open()
             elif "/multisig/vcp" in route:
+
                 _is_response = False
                 _exn = self._app.vault.hby.db.exns.get(keys=(said,))
+                _gid = ""
+
                 if _exn is not None:
                     _gid = _exn.ked.get("a", {}).get("gid", "")
                     if _gid:
@@ -338,12 +379,18 @@ class WhisperPlugin(
                                             {"signer_aid": _sender}
                                         )
                 if not _is_response:
+                    if not _gid or self._open_registry_dialog_gid == _gid:
+                        return
                     from .init.accept_registry import AcceptRegistryProposalDialog
                     dialog = AcceptRegistryProposalDialog(
-                        app=self._app,
-                        parent=vault_page,
-                        proposal_said=said,
+                        app=self._app, parent=vault_page, proposal_said=said,
                     )
+                    self._open_registry_dialog_gid = _gid
+
+                    def _clear_registry_dialog():
+                        self._open_registry_dialog_gid = None
+
+                    dialog.finished.connect(_clear_registry_dialog)
                     dialog.open()
         except Exception:
             logger.exception("Error handling new notification in WhisperPlugin")

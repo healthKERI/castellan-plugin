@@ -140,7 +140,14 @@ class WhisperSetupPage(LocksmithFormPage):
             f"font-size: 13px; color: {colors.TEXT_SUBTLE}; font-weight: 200;"
         )
         layout.addWidget(self._s1_subtext_lbl)
-        layout.addSpacing(20)
+        layout.addSpacing(6)
+
+        _s1_body = QWidget()
+        _s1_body_layout = QVBoxLayout(_s1_body)
+        _s1_body_layout.setContentsMargins(10, 0, 0, 0)
+        _s1_body_layout.setSpacing(0)
+
+        _s1_body_layout.addSpacing(20)
 
         # Pre-upload: dropdown + button (hidden once upload succeeds).
         self._s1_input = QWidget()
@@ -156,13 +163,13 @@ class WhisperSetupPage(LocksmithFormPage):
         self._upload_button.clicked.connect(self._on_upload_clicked)
         s1_in.addWidget(self._upload_button)
         s1_in.addStretch()
-        layout.addWidget(self._s1_input)
+        _s1_body_layout.addWidget(self._s1_input)
 
         self._id_aid_label = QLabel("")
         self._id_aid_label.setStyleSheet(
             f"font-size: 11px; color: {colors.TEXT_SUBTLE}; font-family: {get_monospace_font_family()};"
         )
-        layout.addWidget(self._id_aid_label)
+        _s1_body_layout.addWidget(self._id_aid_label)
 
         # Post-upload: chosen identifier summary (hidden until upload succeeds).
         self._s1_chosen = QWidget()
@@ -180,8 +187,9 @@ class WhisperSetupPage(LocksmithFormPage):
         )
         s1_ch.addWidget(self._s1_chosen_aid_lbl)
         self._s1_chosen.hide()
-        layout.addWidget(self._s1_chosen)
+        _s1_body_layout.addWidget(self._s1_chosen)
 
+        layout.addWidget(_s1_body)
         layout.addSpacing(40)
 
     # -- Section 2: Wait for Peers --------------------------------------
@@ -202,13 +210,22 @@ class WhisperSetupPage(LocksmithFormPage):
             f"font-size: 13px; color: {colors.TEXT_SUBTLE}; font-weight: 200;"
         )
         layout.addWidget(self._s2_subtext_lbl)
-        layout.addSpacing(12)
+        layout.addSpacing(6)
+
+        _s2_body = QWidget()
+        _s2_body_layout = QVBoxLayout(_s2_body)
+        _s2_body_layout.setContentsMargins(10, 0, 0, 0)
+        _s2_body_layout.setSpacing(0)
+
+        _s2_body_layout.addSpacing(12)
 
         self._peer_count_label = QLabel("0 peer(s) have joined weirwood")
         self._peer_count_label.setStyleSheet(
             f"font-size: 14px; color: {colors.TEXT_SUBTLE};"
         )
-        layout.addWidget(self._peer_count_label)
+        _s2_body_layout.addWidget(self._peer_count_label)
+
+        layout.addWidget(_s2_body)
         layout.addSpacing(40)
 
     # -- Section 3: Create Group Identifier -----------------------------
@@ -230,23 +247,30 @@ class WhisperSetupPage(LocksmithFormPage):
             f"font-size: 13px; color: {colors.TEXT_SUBTLE}; font-weight: 200;"
         )
         layout.addWidget(self._s3_subtext_lbl)
-        layout.addSpacing(12)
+        layout.addSpacing(6)
+
+        _s3_body = QWidget()
+        _s3_body_layout = QVBoxLayout(_s3_body)
+        _s3_body_layout.setContentsMargins(10, 0, 0, 0)
+        _s3_body_layout.setSpacing(0)
+
+        _s3_body_layout.addSpacing(12)
 
         self._group_alias_field = FloatingLabelLineEdit("Group Identifier Alias")
         self._group_alias_field.setFixedWidth(500)
-        layout.addWidget(self._group_alias_field)
-        layout.addSpacing(16)
+        _s3_body_layout.addWidget(self._group_alias_field)
+        _s3_body_layout.addSpacing(16)
 
         participants_lbl = QLabel("Group Participants")
         participants_lbl.setStyleSheet("font-weight: 600; font-size: 14px;")
-        layout.addWidget(participants_lbl)
+        _s3_body_layout.addWidget(participants_lbl)
 
         self._participants_container = QWidget()
         self._participants_container_layout = QVBoxLayout(self._participants_container)
         self._participants_container_layout.setContentsMargins(0, 0, 0, 0)
         self._participants_selector: ExtensibleSelectorWidget | None = None
-        layout.addWidget(self._participants_container)
-        layout.addSpacing(4)
+        _s3_body_layout.addWidget(self._participants_container)
+        _s3_body_layout.addSpacing(4)
 
         # Frozen participant list (replaces selector when section 3 is locked)
         self._s3_frozen_participants_widget = QWidget()
@@ -254,9 +278,9 @@ class WhisperSetupPage(LocksmithFormPage):
         self._s3_frozen_participants_layout = QVBoxLayout(self._s3_frozen_participants_widget)
         self._s3_frozen_participants_layout.setContentsMargins(0, 0, 0, 0)
         self._s3_frozen_participants_layout.setSpacing(0)
-        layout.addWidget(self._s3_frozen_participants_widget)
+        _s3_body_layout.addWidget(self._s3_frozen_participants_widget)
 
-        layout.addSpacing(8)
+        _s3_body_layout.addSpacing(8)
 
         # Self-identity labels — always visible once section 3 is revealed
         self._s3_self_widget = QWidget()
@@ -273,12 +297,12 @@ class WhisperSetupPage(LocksmithFormPage):
             f"font-size: 11px; color: {colors.TEXT_SUBTLE}; font-family: {get_monospace_font_family()};"
         )
         s3_self_vbox.addWidget(self._s3_self_aid_lbl)
-        layout.addWidget(self._s3_self_widget)
-        layout.addSpacing(16)
+        _s3_body_layout.addWidget(self._s3_self_widget)
+        _s3_body_layout.addSpacing(16)
 
         thresholds_lbl = QLabel("Thresholds")
         thresholds_lbl.setStyleSheet("font-weight: 600; font-size: 14px;")
-        layout.addWidget(thresholds_lbl)
+        _s3_body_layout.addWidget(thresholds_lbl)
 
         thresh_row = QHBoxLayout()
         self._signing_threshold = FloatingLabelLineEdit("Signing Threshold")
@@ -291,8 +315,20 @@ class WhisperSetupPage(LocksmithFormPage):
         self._rotation_threshold.setFixedWidth(240)
         thresh_row.addWidget(self._rotation_threshold)
         thresh_row.addStretch()
-        layout.addLayout(thresh_row)
-        layout.addSpacing(8)
+        _s3_body_layout.addLayout(thresh_row)
+        _s3_body_layout.addSpacing(8)
+
+        # TODO: Implement delegation, we will also need to lock delegation selection on section progression
+        delegator_lbl = QLabel("Delegator")
+        delegator_lbl.setStyleSheet("font-weight: 600; font-size: 14px;")
+        _s3_body_layout.addWidget(delegator_lbl)
+
+        self._delegator_container = QWidget()
+        self._delegator_container_layout = QVBoxLayout(self._delegator_container)
+        self._delegator_container_layout.setContentsMargins(0, 0, 0, 0)
+        self._delegator_selector: ExtensibleSelectorWidget | None = None
+        _s3_body_layout.addWidget(self._delegator_container)
+        _s3_body_layout.addSpacing(4)
 
         toad_row = QHBoxLayout()
         toad_lbl = QLabel("Threshold of Acceptable Duplicity: ")
@@ -304,8 +340,8 @@ class WhisperSetupPage(LocksmithFormPage):
         self._toad_field.setAlignment(Qt.AlignmentFlag.AlignCenter)
         toad_row.addWidget(self._toad_field)
         toad_row.addStretch()
-        layout.addLayout(toad_row)
-        layout.addSpacing(20)
+        _s3_body_layout.addLayout(toad_row)
+        _s3_body_layout.addSpacing(20)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -314,37 +350,54 @@ class WhisperSetupPage(LocksmithFormPage):
         self._create_group_button.clicked.connect(self._on_create_group_clicked)
         btn_row.addWidget(self._create_group_button)
         btn_row.addStretch()
-        layout.addLayout(btn_row)
+        _s3_body_layout.addLayout(btn_row)
+
+        layout.addWidget(_s3_body)
         layout.addSpacing(40)
 
     # -- Section 4: Progress --------------------------------------------
     def _build_section4(self, layout: QVBoxLayout):
-        self._add_section_header(layout, "Initializing…",
-                                 "Coordinating signatures across participants.")
-        layout.addSpacing(12)
+        self._s4_header_lbl = QLabel("Initializing…")
+        self._s4_header_lbl.setStyleSheet(f"font-weight: bold; font-size: 20px; color: {colors.TEXT_MENU};")
+        layout.addWidget(self._s4_header_lbl)
+        layout.addSpacing(6)
+        self._s4_subtext_lbl = QLabel("Coordinating signatures across participants.")
+        self._s4_subtext_lbl.setWordWrap(True)
+        self._s4_subtext_lbl.setStyleSheet(f"font-size: 13px; color: {colors.TEXT_SUBTLE}; font-weight: 200;")
+        layout.addWidget(self._s4_subtext_lbl)
+        layout.addSpacing(6)
+
+        _s4_body = QWidget()
+        _s4_body_layout = QVBoxLayout(_s4_body)
+        _s4_body_layout.setContentsMargins(10, 0, 0, 0)
+        _s4_body_layout.setSpacing(0)
+
+        _s4_body_layout.addSpacing(12)
 
         self._round1_frame, self._round1_participants_layout = self._make_progress_frame(
             "Step 1 of 2 — Group Identifier"
         )
-        layout.addWidget(self._round1_frame)
-        layout.addSpacing(12)
+        _s4_body_layout.addWidget(self._round1_frame)
+        _s4_body_layout.addSpacing(12)
 
         self._round2_frame, self._round2_participants_layout = self._make_progress_frame(
             "Step 2 of 2 — Registry"
         )
-        layout.addWidget(self._round2_frame)
+        _s4_body_layout.addWidget(self._round2_frame)
+
+        layout.addWidget(_s4_body)
         layout.addSpacing(40)
 
     def _make_progress_frame(self, title: str) -> tuple["QFrame", "QVBoxLayout"]:
         frame = QFrame()
         frame.setStyleSheet(
             f"QFrame {{ border: 1px solid {colors.BORDER}; border-radius: 8px; "
-            f"background: white; padding: 16px; }}"
+            f"background: {colors.BACKGROUND_CONTENT}; padding: 16px; }}"
         )
-        frame.setFixedWidth(500)
+        frame.setFixedWidth(510)
         fl = QVBoxLayout(frame)
-        fl.setContentsMargins(16, 16, 16, 16)
-        fl.setSpacing(4)
+        fl.setContentsMargins(8, 8, 8, 8)
+        fl.setSpacing(2)
 
         title_lbl = QLabel(title)
         title_lbl.setStyleSheet(
@@ -355,7 +408,7 @@ class WhisperSetupPage(LocksmithFormPage):
         participants_container = QWidget()
         participants_layout = QVBoxLayout(participants_container)
         participants_layout.setContentsMargins(0, 0, 0, 0)
-        participants_layout.setSpacing(4)
+        participants_layout.setSpacing(0)
         fl.addWidget(participants_container)
 
         return frame, participants_layout
@@ -363,16 +416,6 @@ class WhisperSetupPage(LocksmithFormPage):
     # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
-
-    def _add_section_header(self, layout: QVBoxLayout, header: str, sub: str):
-        h = QLabel(header)
-        h.setStyleSheet(f"font-weight: bold; font-size: 20px; color: {colors.TEXT_MENU};")
-        layout.addWidget(h)
-        layout.addSpacing(6)
-        s = QLabel(sub)
-        s.setWordWrap(True)
-        s.setStyleSheet(f"font-size: 13px; color: {colors.TEXT_SUBTLE}; font-weight: 200;")
-        layout.addWidget(s)
 
     def _scroll_to_bottom(self):
         QTimer.singleShot(
@@ -417,6 +460,17 @@ class WhisperSetupPage(LocksmithFormPage):
         self._section2.hide()
         self._section3.hide()
         self._section4.hide()
+
+        # Reset section 1 to pre-upload state
+        self._s1_header_lbl.setText("Choose Your Identifier")
+        self._s1_subtext_lbl.setText(
+            "Select the single (non-group) identifier that will represent you "
+            "in the weirwood network. This identifier will be uploaded to weirwood "
+            "so peers can discover you."
+        )
+        self._s1_input.show()
+        self._id_aid_label.show()
+        self._s1_chosen.hide()
 
         # Stop any poller bound to the previous vault.
         if self._poller is not None:
@@ -672,7 +726,7 @@ class WhisperSetupPage(LocksmithFormPage):
         chosen_aid = hab.pre if hab else ""
         # Always update self-identity labels
         if hab:
-            self._s3_self_name_lbl.setText(f"{alias} (yours)" or "— (yours")
+            self._s3_self_name_lbl.setText(alias or "—")
             self._s3_self_aid_lbl.setText(chosen_aid or "—")
         # Skip rebuilding selector if section 3 is already locked
         if state.section4_started or state.init_step >= 4:
@@ -696,6 +750,22 @@ class WhisperSetupPage(LocksmithFormPage):
         )
         self._participants_selector.setFixedWidth(500)
         self._participants_container_layout.addWidget(self._participants_selector)
+
+        # TODO Implement delegation, we will also need to lock delegation selection on section progression
+
+        if self._delegator_selector is not None:
+            self._delegator_container_layout.removeWidget(self._delegator_selector)
+            self._delegator_selector.deleteLater()
+            self._delegator_selector = None
+
+        self._delegator_selector = ExtensibleSelectorWidget(
+            dropdown_label="Select Delegator",
+            selector_dropdown_items=items,
+            parent=self,
+            max_scrollable_height=200,
+        )
+        self._delegator_selector.setFixedWidth(500)
+        self._delegator_container_layout.addWidget(self._delegator_selector)
 
     def _on_create_group_clicked(self):
         state = self._get_init_state()
@@ -985,6 +1055,12 @@ class WhisperSetupPage(LocksmithFormPage):
         state.init_complete = True
         self._save_init_state(state)
 
+        self._s4_header_lbl.setText("Initialized!")
+        self._s4_subtext_lbl.setText(
+            "Signatures have been coordinated across participants. "
+            "You are ready to issue credentials."
+        )
+
         # Stop the poller
         if self._poller is not None:
             try:
@@ -995,8 +1071,8 @@ class WhisperSetupPage(LocksmithFormPage):
 
         # Navigate to issued credentials
         vault_page = getattr(self.app, "_vault_page", None)
-        if vault_page and hasattr(vault_page, "_show_page"):
-            vault_page._show_page("whisper_issued_credentials")
+        if vault_page and hasattr(vault_page, "_on_plugin_entry_clicked"):
+            vault_page._on_plugin_entry_clicked("whisper")
 
     def _resolve_aid_alias(self, aid: str) -> str:
         hab = self.app.vault.hby.habs.get(aid)
@@ -1038,7 +1114,7 @@ class WhisperSetupPage(LocksmithFormPage):
             lbl = QLabel(text)
             # lbl.setWordWrap(True)
             lbl.setStyleSheet(
-                f"font-size: 13px; color: {colors.SUCCESS if signed else colors.TEXT_SUBTLE}; border: none;"
+                f"font-size: 11px; color: {colors.SUCCESS if signed else colors.TEXT_SUBTLE}; border: none;"
             )
             participants_layout.addWidget(lbl)
             participant_labels_dict[aid] = lbl
@@ -1053,7 +1129,7 @@ class WhisperSetupPage(LocksmithFormPage):
         prefix = "✓ " if signed else "○ "
         lbl.setText(f"{prefix}{alias} — {aid}" if alias else f"{prefix}{aid}")
         lbl.setStyleSheet(
-            f"font-size: 13px; color: {colors.SUCCESS if signed else colors.TEXT_SUBTLE}; border: none;"
+            f"font-size: 11px; color: {colors.SUCCESS if signed else colors.TEXT_SUBTLE}; border: none;"
         )
 
     def _make_participant_label_row(self, aid: str) -> "QWidget":

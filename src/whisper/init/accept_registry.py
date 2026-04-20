@@ -244,7 +244,7 @@ class AcceptRegistryProposalDialog(LocksmithDialog):
     def _on_doer_event(self, doer_name: str, event_type: str, data: dict):
         if doer_name != "WhisperRegistryAcceptDoer":
             return
-        if event_type == "registry_accepted":
+        if event_type == "registry_accept_waiting":
             self.close()
         elif event_type == "registry_accept_failed":
             self.accept_button.setEnabled(True)
