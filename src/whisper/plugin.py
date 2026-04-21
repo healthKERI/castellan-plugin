@@ -108,7 +108,7 @@ class WhisperPlugin(
             (":/assets/material-icons/out-badge.svg", "Issued Credentials", "whisper_issued_credentials"),
             (":/assets/material-icons/in-badge.svg", "Received Credentials", "whisper_received_credentials"),
             (":/assets/material-icons/passport.svg", "Initialization", "whisper_setup"),
-            (":/assets/material-icons/settings.svg", "Settings", "whisper_settings"),
+            (":/assets/material-icons/settings-hover.svg", "Settings", "whisper_settings"),
         ]
 
         self._nav_buttons_by_page = {}
