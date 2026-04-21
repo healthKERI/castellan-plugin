@@ -216,7 +216,12 @@ class WhisperPlugin(
             exc=vault.plugin_state["whisper"]["exc"],
         )
         self._backer_fetch_doer = WeirwoodBackerFetchDoer(self._app)
+
         vault.extend([self._identifier_poller, self._message_poller, self._backer_fetch_doer])
+
+        self._identifier_poller.signals.initial_load_complete.connect(
+            self._message_poller.mark_kel_load_ready
+        )
 
         _init_state = self._db.whisperInitState.get(keys=("init",))
         if (

@@ -23,6 +23,7 @@ from hio.base import doing
 from keri.app import grouping as keri_grouping
 from keri.app.habbing import GroupHab
 from keri.core import coring, serdering, parsing
+from keri.db.dbing import snKey, dgKey
 from keri.help import helping
 from keri.peer import exchanging
 from keri.vdr import credentialing as vdr_credentialing
@@ -140,8 +141,14 @@ class WeirwoodMessagePoller(doing.Doer):
     def __init__(self, app: "LocksmithApplication", exc, tock: float = 10.0):
         self.app = app
         self.exc = exc
+        self._kel_load_ready: bool = False
         super().__init__(tock=tock)
         logger.info("WeirwoodMessagePoller initialized")
+
+    def mark_kel_load_ready(self):
+        """Called once by UploadedIdentifierPoller after its first KEL-fetch cycle."""
+        self._kel_load_ready = True
+        logger.info("WeirwoodMessagePoller: initial KEL load confirmed, message processing enabled")
 
     def recur(self, tyme):
         asyncio.get_event_loop().create_task(self._poll())
@@ -151,9 +158,15 @@ class WeirwoodMessagePoller(doing.Doer):
         db = self.app.vault.plugin_state.get("whisper", {}).get("db")
         state = db.whisperInitState.get(keys=("init",)) if db else None
         whisper_aid = state.chosen_identifier_aid if state else None
+
+        if not self._kel_load_ready:
+            logger.debug("WeirwoodMessagePoller: waiting for initial KEL load before processing messages")
+            return
+
         result = await remoting.fetch_messages(
             self.app, aid=whisper_aid, topic=_TOPIC_MULTISIG, unread_only=True
         )
+
         if not result.get("success"):
             logger.info(f"Failed to fetch messages: {result.get('error', 'Unknown error')}")
             return
@@ -187,6 +200,11 @@ class WeirwoodMessagePoller(doing.Doer):
                 self._drain_cues(pending_alias=alias)
             except Exception as e:
                 logger.warning(f"Failed to process message {msg.get('id')}: {e}")
+
+        # Re-process exchanger escrows after the full batch in case a peer KEL
+        # arrived concurrently from the identifier poller during this poll cycle.
+        self.exc.processEscrow()
+        self._drain_cues(pending_alias="")
 
 
     def _drain_cues(self, pending_alias: str = ""):
