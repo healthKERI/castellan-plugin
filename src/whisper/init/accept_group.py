@@ -32,6 +32,7 @@ from locksmith.ui.toolkit.widgets import (
 from locksmith.ui.toolkit.widgets.fields import FloatingLabelComboBox
 
 from .doers import WhisperMultisigJoinDoer
+from ..ui.propagation import PropagationMode, PropagationModeWidget
 
 if TYPE_CHECKING:
     from locksmith.core.apping import LocksmithApplication
@@ -186,6 +187,11 @@ class AcceptGroupProposalDialog(LocksmithDialog):
             self.local_id_dropdown.addItem(f"{item['alias']}", item)
         layout.addWidget(self.local_id_dropdown)
 
+        layout.addSpacing(16)
+        self._propagation_widget = PropagationModeWidget(include_mailbox_only=True)
+        self._propagation_widget.setFixedWidth(420)
+        layout.addWidget(self._propagation_widget)
+
         layout.addStretch()
         self.scroll_area.setWidget(content)
 
@@ -275,11 +281,13 @@ class AcceptGroupProposalDialog(LocksmithDialog):
         self.join_button.setText("Joining...")
 
         try:
+            propagation_mode = self._propagation_widget.current_mode()
             doer = WhisperMultisigJoinDoer(
                 app=self.app,
                 alias=alias,
                 proposal_said=self.proposal_said,
                 mhab=mhab,
+                propagation_mode=propagation_mode,
                 signal_bridge=self.app.vault.signals,
             )
             self.app.vault.extend([doer])

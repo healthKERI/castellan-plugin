@@ -7,7 +7,7 @@ Registers Whisper page(s), menus, and lifecycle hooks.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QWidget
@@ -406,6 +406,63 @@ class WhisperPlugin(
             logger.info("WhisperPlugin: healthKERI account created — syncing to whisper state")
             sync_account_to_whisper(self._app)
             self.resetEssr(self._app.vault)
+
+    def get_multisig_dialog(self, app: Any, parent: Any, proposal_said: str, route: str) -> "QWidget | None":
+        """Return a whisper-aware dialog for a multisig proposal notification.
+
+        Only handles proposals where the local whisper chosen identifier is a
+        signing member.  Returns None to fall through to base locksmith dialog.
+        """
+        try:
+            db: "WhisperBaser | None" = app.vault.plugin_state.get("whisper", {}).get("db")
+            if db is None:
+                return None
+            state = db.whisperInitState.get(keys=("init",))
+            if state is None or not state.chosen_identifier_aid:
+                return None
+
+            hby = app.vault.hby
+            chosen_hab = None
+            for _, hab in hby.habs.items():
+                if not hasattr(hab, "mhab") and hab.pre == state.chosen_identifier_aid:
+                    chosen_hab = hab
+                    break
+            if chosen_hab is None:
+                return None
+
+            exn, pathed = keri_exchanging.cloneMessage(hby, proposal_said)
+            if exn is None:
+                return None
+
+            if "/multisig/icp" in route:
+                smids = exn.ked.get("a", {}).get("smids", [])
+                if state.chosen_identifier_aid not in smids:
+                    return None
+                from .init.accept_group import AcceptGroupProposalDialog
+                multisig_alias = app.vault.plugin_state.get("whisper", {}).get(
+                    "proposed_group_alias", ""
+                )
+                return AcceptGroupProposalDialog(
+                    app=app,
+                    parent=parent,
+                    proposal_said=proposal_said,
+                    multisig_alias=multisig_alias,
+                )
+            elif "/multisig/vcp" in route:
+                gid = exn.ked.get("a", {}).get("gid", "")
+                smids = list(hby.db.signingMembers(pre=gid))
+                if state.chosen_identifier_aid not in smids:
+                    return None
+                from .init.accept_registry import AcceptRegistryProposalDialog
+                return AcceptRegistryProposalDialog(
+                    app=app,
+                    parent=parent,
+                    proposal_said=proposal_said,
+                )
+            # TODO: add whisper-aware dialogs for /multisig/rot, /multisig/ixn, etc.
+        except Exception:
+            logger.exception("WhisperPlugin.get_multisig_dialog failed")
+        return None
 
     def get_menu_entry(self) -> MenuButton:
         return self._account_button

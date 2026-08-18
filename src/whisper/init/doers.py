@@ -29,6 +29,7 @@ from keri.peer import exchanging
 from keri.vdr import credentialing as vdr_credentialing
 
 from ..core import remoting
+from ..ui.propagation import PropagationMode
 from ..db.basing import WhisperInitState
 
 if TYPE_CHECKING:
@@ -255,7 +256,9 @@ class WhisperGroupMultisigInceptDoer(doing.DoDoer):
                  smids: list[str], rmids: list[str] | None = None,
                  isith: str | int | None = None, nsith: str | int | None = None,
                  wits: list[str] | None = None, toad: int = 0,
-                 delpre: str | None = None, signal_bridge=None, **kwargs):
+                 delpre: str | None = None,
+                 propagation_mode: str = PropagationMode.WEIRWOOD_ONLY,
+                 signal_bridge=None, **kwargs):
         self.app = app
         self.hby = app.vault.hby
         self.alias = alias
@@ -267,6 +270,7 @@ class WhisperGroupMultisigInceptDoer(doing.DoDoer):
         self.wits = wits or []
         self.toad = toad
         self.delpre = delpre
+        self.propagation_mode = propagation_mode
         self.signal_bridge = signal_bridge
         self.kwargs = kwargs
         self.counselor = app.vault.counselor
@@ -317,11 +321,22 @@ class WhisperGroupMultisigInceptDoer(doing.DoDoer):
 
             others = [pre for pre in self.smids if pre != self.mhab.pre]
             for recpt in others:
-                asyncio.get_event_loop().create_task(
-                    remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw, sender_aid=self.mhab.pre,
-                                          multisig_alias=self.alias)
-                )
-                logger.info(f"Queued weirwood icp EXN for {recpt[:16]}...")
+                if self.propagation_mode in (PropagationMode.WEIRWOOD_ONLY,
+                                             PropagationMode.WEIRWOOD_AND_MAILBOX):
+                    asyncio.get_event_loop().create_task(
+                        remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw,
+                                              sender_aid=self.mhab.pre,
+                                              multisig_alias=self.alias)
+                    )
+                    logger.info(f"Queued weirwood icp EXN for {recpt[:16]}...")
+                if self.propagation_mode in (PropagationMode.MAILBOX_ONLY,
+                                             PropagationMode.WEIRWOOD_AND_MAILBOX):
+                    try:
+                        self.app.vault.postman.send(
+                            src=self.mhab.pre, dest=recpt, serder=exn, attachment=atc
+                        )
+                    except Exception as _e:
+                        logger.warning(f"Mailbox icp send failed for {recpt[:16]}: {_e}")
 
             if self.signal_bridge:
                 self.signal_bridge.emit_doer_event(
@@ -396,12 +411,14 @@ class WhisperMultisigJoinDoer(doing.DoDoer):
     """
 
     def __init__(self, app: "LocksmithApplication", alias: str, proposal_said: str,
-                 mhab, signal_bridge=None):
+                 mhab, propagation_mode: str = PropagationMode.WEIRWOOD_ONLY,
+                 signal_bridge=None):
         self.app = app
         self.hby = app.vault.hby
         self.alias = alias
         self.proposal_said = proposal_said
         self.mhab = mhab
+        self.propagation_mode = propagation_mode
         self.signal_bridge = signal_bridge
         self.counselor = app.vault.counselor
         super().__init__(doers=[doing.doify(self.join_do)])
@@ -470,9 +487,21 @@ class WhisperMultisigJoinDoer(doing.DoDoer):
 
             others = [pre for pre in smids if pre != self.mhab.pre]
             for recpt in others:
-                asyncio.get_event_loop().create_task(
-                    remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw, sender_aid=self.mhab.pre)
-                )
+                if self.propagation_mode in (PropagationMode.WEIRWOOD_ONLY,
+                                             PropagationMode.WEIRWOOD_AND_MAILBOX):
+                    asyncio.get_event_loop().create_task(
+                        remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw,
+                                              sender_aid=self.mhab.pre)
+                    )
+                if self.propagation_mode in (PropagationMode.MAILBOX_ONLY,
+                                             PropagationMode.WEIRWOOD_AND_MAILBOX):
+                    try:
+                        self.app.vault.postman.send(
+                            src=self.mhab.pre, dest=recpt, serder=resp_exn,
+                            attachment=resp_atc
+                        )
+                    except Exception as _e:
+                        logger.warning(f"Mailbox join send failed for {recpt[:16]}: {_e}")
 
             prefixer = coring.Prefixer(qb64=ghab.pre)
             seqner = coring.Seqner(sn=0)
@@ -534,13 +563,16 @@ class CreateRegistryDoer(doing.DoDoer):
     """
 
     def __init__(self, app: "LocksmithApplication", hab_alias: str,
-                 registry_name: str, weirwood_aid: str, signal_bridge=None):
+                 registry_name: str, weirwood_aid: str,
+                 propagation_mode: str = PropagationMode.WEIRWOOD_ONLY,
+                 signal_bridge=None):
         self.app = app
         self.hby = app.vault.hby
         self.rgy = app.vault.rgy
         self.hab_alias = hab_alias
         self.registry_name = registry_name
         self.weirwood_aid = weirwood_aid
+        self.propagation_mode = propagation_mode
         self.signal_bridge = signal_bridge
         self.counselor = app.vault.counselor
         super().__init__(doers=[doing.doify(self.create_do)])
@@ -610,13 +642,24 @@ class CreateRegistryDoer(doing.DoDoer):
                         smids = self.hby.db.signingMembers(pre=hab.pre)
                         others = [pre for pre in smids if pre != hab.mhab.pre]
                         for recpt in others:
-                            asyncio.get_event_loop().create_task(
-                                remoting.post_message(
-                                    self.app, recpt, _TOPIC_MULTISIG, raw,
-                                    sender_aid=hab.mhab.pre,
+                            if self.propagation_mode in (PropagationMode.WEIRWOOD_ONLY,
+                                                         PropagationMode.WEIRWOOD_AND_MAILBOX):
+                                asyncio.get_event_loop().create_task(
+                                    remoting.post_message(
+                                        self.app, recpt, _TOPIC_MULTISIG, raw,
+                                        sender_aid=hab.mhab.pre,
+                                    )
                                 )
-                            )
-                            logger.info(f"Queued weirwood vcp EXN for {recpt[:16]}...")
+                                logger.info(f"Queued weirwood vcp EXN for {recpt[:16]}...")
+                            if self.propagation_mode in (PropagationMode.MAILBOX_ONLY,
+                                                         PropagationMode.WEIRWOOD_AND_MAILBOX):
+                                try:
+                                    self.app.vault.postman.send(
+                                        src=hab.mhab.pre, dest=recpt, serder=exn,
+                                        attachment=atc
+                                    )
+                                except Exception as _e:
+                                    logger.warning(f"Mailbox vcp send failed for {recpt[:16]}: {_e}")
                     except Exception as e:
                         logger.warning(f"Failed to send /multisig/vcp EXN: {e}")
 
@@ -665,12 +708,14 @@ class WhisperRegistryAcceptDoer(doing.DoDoer):
     """
 
     def __init__(self, app: "LocksmithApplication", proposal_said: str,
-                 mhab, signal_bridge=None):
+                 mhab, propagation_mode: str = PropagationMode.WEIRWOOD_ONLY,
+                 signal_bridge=None):
         self.app = app
         self.hby = app.vault.hby
         self.rgy = app.vault.rgy
         self.proposal_said = proposal_said
         self.mhab = mhab
+        self.propagation_mode = propagation_mode
         self.signal_bridge = signal_bridge
         self.counselor = app.vault.counselor
         super().__init__(doers=[doing.doify(self.accept_do)])
@@ -750,9 +795,21 @@ class WhisperRegistryAcceptDoer(doing.DoDoer):
             smids = self.hby.db.signingMembers(pre=ghab.pre)
             others = [pre for pre in smids if pre != self.mhab.pre]
             for recpt in others:
-                asyncio.get_event_loop().create_task(
-                    remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw, sender_aid=self.mhab.pre)
-                )
+                if self.propagation_mode in (PropagationMode.WEIRWOOD_ONLY,
+                                             PropagationMode.WEIRWOOD_AND_MAILBOX):
+                    asyncio.get_event_loop().create_task(
+                        remoting.post_message(self.app, recpt, _TOPIC_MULTISIG, raw,
+                                              sender_aid=self.mhab.pre)
+                    )
+                if self.propagation_mode in (PropagationMode.MAILBOX_ONLY,
+                                             PropagationMode.WEIRWOOD_AND_MAILBOX):
+                    try:
+                        self.app.vault.postman.send(
+                            src=self.mhab.pre, dest=recpt, serder=resp_exn,
+                            attachment=resp_atc
+                        )
+                    except Exception as _e:
+                        logger.warning(f"Mailbox registry accept send failed for {recpt[:16]}: {_e}")
 
             if self.signal_bridge:
                 self.signal_bridge.emit_doer_event(

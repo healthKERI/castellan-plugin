@@ -37,6 +37,7 @@ from ..core import remoting
 from ..db.basing import WhisperInitState
 from .doers import WhisperGroupMultisigInceptDoer, CreateRegistryDoer
 from .poller import UploadedIdentifierPoller
+from ..ui.propagation import PropagationMode, PropagationModeWidget
 
 if TYPE_CHECKING:
     from locksmith.core.apping import LocksmithApplication
@@ -330,6 +331,10 @@ class WhisperSetupPage(LocksmithFormPage):
         _s3_body_layout.addWidget(self._delegator_container)
         _s3_body_layout.addSpacing(4)
 
+        self._s3_propagation_widget = PropagationModeWidget(include_mailbox_only=False)
+        _s3_body_layout.addWidget(self._s3_propagation_widget)
+        _s3_body_layout.addSpacing(12)
+
         toad_row = QHBoxLayout()
         toad_lbl = QLabel("Threshold of Acceptable Duplicity: ")
         toad_lbl.setStyleSheet("font-size: 14px;")
@@ -460,6 +465,7 @@ class WhisperSetupPage(LocksmithFormPage):
         self._section2.hide()
         self._section3.hide()
         self._section4.hide()
+        self._s3_propagation_widget.setEnabled(True)
 
         # Reset section 1 to pre-upload state
         self._s1_header_lbl.setText("Choose Your Identifier")
@@ -815,6 +821,7 @@ class WhisperSetupPage(LocksmithFormPage):
             isith=isith,
             nsith=nsith,
             toad=toad,
+            propagation_mode=self._s3_propagation_widget.current_mode(),
             signal_bridge=self.app.vault.signals,
         )
         self.app.vault.extend([doer])
@@ -848,6 +855,7 @@ class WhisperSetupPage(LocksmithFormPage):
         self._group_alias_field.setReadOnly(True)
         self._signing_threshold.setReadOnly(True)
         self._rotation_threshold.setReadOnly(True)
+        self._s3_propagation_widget.setEnabled(False)
         self._toad_field.setReadOnly(True)
         self._create_group_button.hide()
 
