@@ -1,8 +1,8 @@
 # -*- encoding: utf-8 -*-
 """
-whisper.credentials.received.list module
+castellan.credentials.received.list module
 
-Received credentials list page — shows received credentials stored on the Weirwood server.
+Received credentials list page — shows received credentials stored on the Castellan server.
 """
 from typing import Any, TYPE_CHECKING
 
@@ -26,7 +26,7 @@ logger = help.ogler.getLogger(__name__)
 
 
 class ReceivedCredentialsListPage(QWidget):
-    """Paginated list of received credentials stored on the Weirwood server."""
+    """Paginated list of received credentials stored on the Castellan server."""
 
     def __init__(self, app, parent: "VaultPage | None" = None):
         super().__init__(parent)
@@ -159,7 +159,7 @@ class ReceivedCredentialsListPage(QWidget):
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(0, 10, 0, 0)
-        label = QLabel("Remove this credential from the Weirwood server?")
+        label = QLabel("Remove this credential from the Castellan server?")
         label.setStyleSheet("font-size: 13px;")
         label.setWordWrap(True)
         layout.addWidget(label)

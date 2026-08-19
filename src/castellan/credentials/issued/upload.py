@@ -1,10 +1,11 @@
 # -*- encoding: utf-8 -*-
 """
-whisper.credentials.received.upload module
+castellan.credentials.issued.upload module
 
-Dialog for uploading received credentials to the Weirwood server.
+Dialog for uploading issued credentials to the Castellan server.
 Uses ExtensibleSelectorWidget for multi-select.
 """
+import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -23,14 +24,14 @@ if TYPE_CHECKING:
 logger = help.ogler.getLogger(__name__)
 
 
-class UploadReceivedCredentialsDialog(LocksmithDialog):
-    """Dialog for uploading one or more received credentials to the Weirwood server."""
+class UploadIssuedCredentialsDialog(LocksmithDialog):
+    """Dialog for uploading one or more issued credentials to the Castellan server."""
 
     def __init__(
-            self,
-            app: "LocksmithApplication",
-            on_refresh: Callable[[], None] | None = None,
-            parent: "VaultPage | None" = None,
+        self,
+        app: "LocksmithApplication",
+        on_refresh: Callable[[], None] | None = None,
+        parent: "VaultPage | None" = None,
     ):
         self.app = app
         self.on_refresh = on_refresh
@@ -41,7 +42,7 @@ class UploadReceivedCredentialsDialog(LocksmithDialog):
         self._content_layout.setContentsMargins(0, 10, 0, 0)
         self._content_layout.setSpacing(12)
 
-        instruction = QLabel("Select credentials to upload to the Weirwood server.")
+        instruction = QLabel("Select credentials to upload to the Castellan server.")
         instruction.setStyleSheet("font-size: 13px; color: #636466;")
         instruction.setWordWrap(True)
         self._content_layout.addWidget(instruction)
@@ -65,8 +66,8 @@ class UploadReceivedCredentialsDialog(LocksmithDialog):
 
         super().__init__(
             parent=parent,
-            title="Upload Received Credentials",
-            title_icon=":/assets/material-icons/in-badge.svg",
+            title="Upload Issued Credentials",
+            title_icon=":/assets/material-icons/out-badge.svg",
             content=content_widget,
             buttons=button_row,
         )
@@ -85,18 +86,16 @@ class UploadReceivedCredentialsDialog(LocksmithDialog):
 
     @qasync.asyncSlot()
     async def _populate_dropdown(self):
-        """Populate the selector with local received credentials not yet on Weirwood."""
+        """Populate the selector with local issued credentials not yet on Castellan."""
         if not self.app or not self.app.vault or not self.app.vault.rgy:
             return
 
         try:
-            existing_saids = await remoting.fetch_all_weirwood_received_saids(self.app)
+            existing_saids = await remoting.fetch_all_castellan_issued_saids(self.app)
 
             reger = self.app.vault.rgy.reger
             hby = self.app.vault.hby
-            saids = list()
-            for pre in self.app.vault.hby.habs.keys():
-                saids.extend([saider for saider in self.app.vault.rgy.reger.subjs.get(keys=(pre,))])
+            saids = [said for (_, said) in reger.issus.getItemIter()]
             creds = reger.cloneCreds(saids, hby.db)
 
             items = []
@@ -114,25 +113,23 @@ class UploadReceivedCredentialsDialog(LocksmithDialog):
                 schema_title = schema.get('title', 'Unknown Schema')
                 issuer = sad.get('i', '')
                 subject = sad.get('a', {})
-                holder = subject.get('i', '') if isinstance(subject, dict) else ''
-                issuer_display = issuer[:15] + '...' if len(issuer) > 15 else issuer
-
-                display_text = f"{schema_title} - {issuer_display} ({cred_said[:12]}...)"
+                recipient = subject.get('i', '') if isinstance(subject, dict) else ''
+                recipient_display = recipient[:15] + '...' if len(recipient) > 15 else recipient
+                display_text = f"{schema_title} - {recipient_display} ({cred_said[:12]}...)"
                 items.append((display_text, {
                     'said': cred_said,
                     'schema': schema,
                     'issuer': issuer,
-                    'holder': holder,
-                    'iss_hol': f"Issuer/Holder: {issuer[:10]}... / {holder[:10]}...",
+                    'recipient': recipient,
+                    'iss_rec': f"Issuer/Recipient: {issuer[:10]}... / {recipient[:10]}...",
                     'schema_title': schema_title
                 }))
 
             if items:
                 self.credential_selector._populate_dropdown(items)
             else:
-                self.credential_selector.selector_dropdown.setPlaceholderText("No credentials Available")
+                self.credential_selector.selector_dropdown.setPlaceholderText("No credentials available to upload")
                 self.upload_btn.setEnabled(False)
-
 
         except Exception as e:
             logger.exception(f"Error populating upload dropdown: {e}")
@@ -153,6 +150,7 @@ class UploadReceivedCredentialsDialog(LocksmithDialog):
         self.clear_error()
         self._do_upload(selected)
 
+
     @qasync.asyncSlot()
     async def _do_upload(self, selected: list):
         errors = []
@@ -160,12 +158,12 @@ class UploadReceivedCredentialsDialog(LocksmithDialog):
             for _text, data in selected:
                 if data is None:
                     continue
-                result = await remoting.upload_received_credential(
+                result = await remoting.upload_issued_credential(
                     app=self.app,
                     credential_said=data['said'],
                     schema=data['schema'],
                     issuer=data['issuer'],
-                    holder=data['holder'],
+                    recipient=data['recipient'],
                 )
                 if not result.get('success'):
                     errors.append(f"{data['said'][:12]}...: {result.get('error', 'Unknown error')}")

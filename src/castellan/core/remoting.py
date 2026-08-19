@@ -1,8 +1,8 @@
 # -*- encoding: utf-8 -*-
 """
-whisper.core.remoting module
+castellan.core.remoting module
 
-Functions for interacting with the Weirwood credential management server.
+Functions for interacting with the Castellan credential management server.
 """
 import json
 import urllib.parse
@@ -22,7 +22,7 @@ def _get_essr(app: "LocksmithApplication"):
     """Get the ESSR client from plugin state."""
     if not app.vault:
         return None
-    return app.vault.plugin_state.get("whisper", {}).get("essr")
+    return app.vault.plugin_state.get("castellan", {}).get("essr")
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ async def fetch_issued_credentials(
     filter_term: Optional[str] = None,
     order: Optional[list] = None,
 ) -> Dict[str, Any]:
-    """Fetch issued credentials from the Weirwood server (paginated)."""
+    """Fetch issued credentials from the Castellan server (paginated)."""
     essr = _get_essr(app)
     if not essr:
         return {'success': False, 'error': 'No ESSR connection'}
@@ -66,8 +66,8 @@ async def fetch_issued_credentials(
         return {'success': False, 'error': str(e)}
 
 
-async def fetch_all_weirwood_issued_saids(app: "LocksmithApplication") -> set:
-    """Fetch all issued credential SAIDs currently stored on the Weirwood server."""
+async def fetch_all_castellan_issued_saids(app: "LocksmithApplication") -> set:
+    """Fetch all issued credential SAIDs currently stored on the Castellan server."""
     essr = _get_essr(app)
     if not essr:
         return set()
@@ -79,7 +79,7 @@ async def fetch_all_weirwood_issued_saids(app: "LocksmithApplication") -> set:
             return {cred['said'] for cred in data.get('credentials', [])}
         return set()
     except Exception as e:
-        logger.error(f"Error fetching weirwood issued SAIDs: {e}")
+        logger.error(f"Error fetching castellan issued SAIDs: {e}")
         return set()
 
 
@@ -90,7 +90,7 @@ async def upload_issued_credential(
     issuer: str,
     recipient: str,
 ) -> Dict[str, Any]:
-    """Upload an issued credential to the Weirwood server."""
+    """Upload an issued credential to the Castellan server."""
     essr = _get_essr(app)
     if not essr:
         return {'success': False, 'error': 'No ESSR connection'}
@@ -147,7 +147,7 @@ async def delete_issued_credential(
     app: "LocksmithApplication",
     said: str,
 ) -> Dict[str, Any]:
-    """Delete an issued credential from the Weirwood server."""
+    """Delete an issued credential from the Castellan server."""
     essr = _get_essr(app)
     if not essr:
         return {'success': False, 'error': 'No ESSR connection'}
@@ -181,7 +181,7 @@ async def fetch_received_credentials(
     filter_term: Optional[str] = None,
     order: Optional[list] = None,
 ) -> Dict[str, Any]:
-    """Fetch received credentials from the Weirwood server (paginated)."""
+    """Fetch received credentials from the Castellan server (paginated)."""
     essr = _get_essr(app)
     if not essr:
         return {'success': False, 'error': 'No ESSR connection'}
@@ -211,8 +211,8 @@ async def fetch_received_credentials(
         return {'success': False, 'error': str(e)}
 
 
-async def fetch_all_weirwood_received_saids(app: "LocksmithApplication") -> set:
-    """Fetch all received credential SAIDs currently stored on the Weirwood server."""
+async def fetch_all_castellan_received_saids(app: "LocksmithApplication") -> set:
+    """Fetch all received credential SAIDs currently stored on the Castellan server."""
     essr = _get_essr(app)
     if not essr:
         return set()
@@ -224,7 +224,7 @@ async def fetch_all_weirwood_received_saids(app: "LocksmithApplication") -> set:
             return {cred['said'] for cred in data.get('credentials', [])}
         return set()
     except Exception as e:
-        logger.error(f"Error fetching weirwood received SAIDs: {e}")
+        logger.error(f"Error fetching castellan received SAIDs: {e}")
         return set()
 
 
@@ -235,7 +235,7 @@ async def upload_received_credential(
     issuer: str,
     holder: str,
 ) -> Dict[str, Any]:
-    """Upload a received credential to the Weirwood server."""
+    """Upload a received credential to the Castellan server."""
     essr = _get_essr(app)
     if not essr:
         return {'success': False, 'error': 'No ESSR connection'}
@@ -292,7 +292,7 @@ async def delete_received_credential(
     app: "LocksmithApplication",
     said: str,
 ) -> Dict[str, Any]:
-    """Delete a received credential from the Weirwood server."""
+    """Delete a received credential from the Castellan server."""
     essr = _get_essr(app)
     if not essr:
         return {'success': False, 'error': 'No ESSR connection'}

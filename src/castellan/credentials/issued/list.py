@@ -1,8 +1,8 @@
 # -*- encoding: utf-8 -*-
 """
-whisper.credentials.issued.list module
+castellan.credentials.issued.list module
 
-Issued credentials list page — shows issued credentials stored on the Weirwood server.
+Issued credentials list page — shows issued credentials stored on the Castellan server.
 """
 import json
 from typing import Any, TYPE_CHECKING
@@ -27,7 +27,7 @@ logger = help.ogler.getLogger(__name__)
 
 
 class IssuedCredentialsListPage(QWidget):
-    """Paginated list of issued credentials stored on the Weirwood server."""
+    """Paginated list of issued credentials stored on the Castellan server."""
 
     def __init__(self, app, parent: "VaultPage | None" = None):
         super().__init__(parent)
@@ -160,7 +160,7 @@ class IssuedCredentialsListPage(QWidget):
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(0, 10, 0, 0)
-        label = QLabel("Remove this credential from the Weirwood server?")
+        label = QLabel("Remove this credential from the Castellan server?")
         label.setStyleSheet("font-size: 13px;")
         label.setWordWrap(True)
         layout.addWidget(label)
