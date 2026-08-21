@@ -8,23 +8,28 @@ from typing import Optional
 from urllib import parse
 from urllib.parse import urlparse
 
+import qasync
+import requests
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRect, Signal, QSize
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QButtonGroup, QFrame, QPushButton, QVBoxLayout, )
 from keri import help
+from keri.app import connecting
 from keri.app.habbing import GroupHab
 from keri.core.coring import randomNonce, Seqner, Saider
 from keri.core.eventing import SealEvent
 from keri.core.serdering import SerderKERI
 from keri.help import helping
+from keri.kering import Schemes
+from locksmith.core import habbing
 from locksmith.core.apping import LocksmithApplication
 from locksmith.core.signals import DoerSignalBridge
 from locksmith.core.remoting import resolve_oobi_sync
 from locksmith.ui import colors
 from locksmith.ui.navigation import Pages
 from locksmith.ui.toolkit.widgets import CollapsibleSection
-from locksmith.ui.toolkit.widgets.buttons import LocksmithButton, LocksmithInvertedButton
+from locksmith.ui.toolkit.widgets.buttons import LocksmithButton, LocksmithInvertedButton, LocksmithCopyButton
 from locksmith.ui.toolkit.widgets.fields import FloatingLabelComboBox, FloatingLabelLineEdit
 from locksmith.ui.toolkit.widgets.page import LocksmithFormPage
 from locksmith.ui.vault.identifiers.authenticate import WitnessAuthenticationDialog
@@ -160,12 +165,8 @@ class CastellanAdminSetupPage(LocksmithFormPage):
         layout.addWidget(hint)
         layout.addSpacing(10)
 
-        self._castellan_url_field = FloatingLabelLineEdit("Castellan Server URL")
-        self._castellan_url_field.setFixedWidth(420)
-        layout.addWidget(self._castellan_url_field)
-        layout.addSpacing(20)
-
         self._castellan_oobi_field = FloatingLabelLineEdit("Castellan Server OOBI")
+        self._castellan_oobi_field.setText("http://saas-platform:5927/oobi/ENthQEOcwbhBa46Z9Za5fy58RS4VzQxi3FVgC98PLzth")
         self._castellan_oobi_field.setFixedWidth(420)
         layout.addWidget(self._castellan_oobi_field)
 
@@ -192,9 +193,31 @@ class CastellanAdminSetupPage(LocksmithFormPage):
         layout.addWidget(hint)
         layout.addSpacing(10)
 
-        self._issuer_dropdown = FloatingLabelComboBox("Issuer")
+        self._issuer_dropdown = FloatingLabelComboBox("Select credential issuer identifier")
         self._issuer_dropdown.setFixedWidth(420)
+        self._issuer_dropdown.currentIndexChanged.connect(self._on_issuer_changed)
         layout.addWidget(self._issuer_dropdown)
+        layout.addSpacing(10)
+
+        # Create OOBI display controls (initially hidden)
+        self.oobi_display_container = QWidget()
+        oobi_layout = QHBoxLayout(self.oobi_display_container)
+        oobi_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._oobi_label = QLabel()
+        self._oobi_label.setStyleSheet("font-size: 11px;")
+        self._oobi_label.setWordWrap(True)
+        oobi_layout.addWidget(self._oobi_label)
+
+        self._oobi_copy_button = LocksmithCopyButton()
+        oobi_layout.addWidget(self._oobi_copy_button)
+
+        layout.addWidget(self.oobi_display_container)
+        layout.addSpacing(10)
+
+        # Initially hide the OOBI display
+        self.oobi_display_container.setVisible(False)
+
 
     def _build_error_display(self):
         """Build the error message display area."""
@@ -278,20 +301,20 @@ class CastellanAdminSetupPage(LocksmithFormPage):
             if self._service_provider_dropdown.currentIndex() == -1:
                 errors.append("Please select a Service Provider.")
         elif mode == "opensource":
-            registrar_url = self._castellan_url_field.text().strip()
-            if not registrar_url:
-                errors.append("Please enter a Registrar URL.")
+            registrar_oobi = self._castellan_oobi_field.text().strip()
+            if not registrar_oobi:
+                errors.append("Please enter a Castellan OOBI.")
             else:
                 # Validate URL format
                 try:
-                    result = urlparse(registrar_url)
+                    result = urlparse(registrar_oobi)
                     if not all([result.scheme, result.netloc]):
-                        errors.append("Registrar URL must be a valid URL (e.g., https://example.com).")
+                        errors.append("Castellan OOBI must be a valid URL (e.g., https://example.com/oobi).")
                 except Exception:
-                    errors.append("Registrar URL must be a valid URL.")
+                    errors.append("Castellan OOBI must be a valid URL.")
 
-        # Validate issuer selection
-        if self._issuer_dropdown.currentIndex() == -1:
+        # Validate issuer selection (index 0 is the empty item)
+        if self._issuer_dropdown.currentIndex() <= 0:
             errors.append("Please select an Issuer.")
 
         return len(errors) == 0, errors
@@ -329,14 +352,10 @@ class CastellanAdminSetupPage(LocksmithFormPage):
         rgy = self.app.vault.rgy
 
         self.settings = CastellanSettings()
-        logger.info(f"setting issuer alias as {self._issuer_dropdown.currentText()}")
-        issuer_alias = self._issuer_map[self._issuer_dropdown.currentText()]
+        issuer_alias = self._issuer_dropdown.currentData()
+        logger.info(f"setting issuer alias as {issuer_alias}")
         hab = hby.habByName(issuer_alias)
         self.settings.issuer_aid = hab.pre
-
-        registrar_url = self._castellan_url_field.text().strip()
-        if registrar_url is not None:
-            self.settings.registrar_url = registrar_url
 
         registrar_oobi = self._castellan_oobi_field.text().strip()
         if registrar_oobi is not None:
@@ -348,12 +367,19 @@ class CastellanAdminSetupPage(LocksmithFormPage):
 
             self.settings.registrar_aid = match.group("cid")
 
-            resolve_oobi_sync(
-                app=self.app,
-                pre=self.settings.registrar_aid,
-                oobi=registrar_oobi,
-                alias="castellan-registrar",
-            )
+            response = requests.get(registrar_oobi)
+            hab.psr.parse(ims=response.content)
+
+            hab.kvy.processEscrows()
+
+            org = connecting.Organizer(hby=hby)
+            org.update(pre=self.settings.registrar_aid, data=dict(alias="castellan-registrar", oobi=registrar_oobi))
+
+            urls = hab.fetchUrls(eid=self.settings.registrar_aid, scheme="tcp")
+            self.settings.registrar_url = urls.get(Schemes.tcp, None)
+
+            if not self.settings.registrar_url:
+                raise ValueError(f"Castellan URL not registered with Castellan AID {self.settings.registrar_aid}).")
 
         publish_mode = self.toggle.value()
         if publish_mode is not None:
@@ -380,6 +406,7 @@ class CastellanAdminSetupPage(LocksmithFormPage):
         auth_dialog.open()
         return
 
+    @qasync.asyncSlot(dict)
     async def _on_auth_codes_entered(self, data: dict):
         """
         Handle auth codes entered from WitnessAuthenticationDialog.
@@ -394,7 +421,7 @@ class CastellanAdminSetupPage(LocksmithFormPage):
         hby = self.app.vault.hby
         rgy = self.app.vault.rgy
 
-        hab = hby.habByName(self.settings.issuer_aid)
+        hab = hby.habs[self.settings.issuer_aid]
 
         auths = {}
         if codes:
@@ -435,6 +462,50 @@ class CastellanAdminSetupPage(LocksmithFormPage):
         self._service_provider_section.toggle()
         self._registrar_url_section.toggle()
 
+    def _on_issuer_changed(self, index: int) -> None:
+        """
+        Handle issuer dropdown selection change.
+
+        Args:
+            index: The index of the newly selected item in the dropdown
+        """
+        if index <= 0:
+            # Empty item selected - hide OOBI display
+            logger.debug("Empty issuer item selected")
+            self.oobi_display_container.setVisible(False)
+            return
+
+        # Get the issuer alias from userData
+        issuer_alias = self._issuer_dropdown.currentData()
+        if not issuer_alias:
+            logger.warning("No issuer alias found in dropdown userData")
+            self.oobi_display_container.setVisible(False)
+            return
+
+        hab = self.app.vault.hby.habByName(issuer_alias)
+        if hab is None:
+            logger.warning(f"Selected issuer '{issuer_alias}' not found in Habby")
+            self.oobi_display_container.setVisible(False)
+            return
+
+        oobi_result = habbing.generate_oobi(self.app, hab)
+
+        if not oobi_result['success'] or not oobi_result['oobi']:
+            logger.warning(f"Failed to generate OOBi for issuer '{issuer_alias}'")
+            self.oobi_display_container.setVisible(False)
+            return
+
+        oobi_url = oobi_result['oobi']
+
+        # Update the label text and copy button content
+        self._oobi_label.setText(oobi_url)
+        self._oobi_copy_button.set_copy_content(oobi_url)
+
+        # Show the OOBI display
+        self.oobi_display_container.setVisible(True)
+
+        logger.debug(f"Issuer changed to: {issuer_alias}")
+
     def selected_mode(self) -> str:
         return self.toggle.value()
 
@@ -443,22 +514,29 @@ class CastellanAdminSetupPage(LocksmithFormPage):
             return
 
         hby = self.app.vault.hby
-        self._issuer_map = {}
 
         self._issuer_dropdown.clear()
 
+        # Add empty item to force user selection
+        self._issuer_dropdown.addItem("", userData=None)
+
         # hby.habs is keyed by AID prefix; hab.name is the human alias
+        issuer_count = 0
         for aid, hab in hby.habs.items():
             if isinstance(hab, GroupHab) or not hab.kever.wits:
                 continue
             display = f"{hab.name} — {aid}"
-            self._issuer_map[display] = hab.name
-            self._issuer_dropdown.addItem(display)
+            # Store hab.name as userData for easy retrieval
+            self._issuer_dropdown.addItem(display, userData=hab.name)
+            issuer_count += 1
 
-        self._issuer_dropdown.setCurrentIndex(-1)
+        # Set to empty item by default (index 0)
+        self._issuer_dropdown.setCurrentIndex(0)
 
-        if len(self._issuer_map) == 1:
-            self._issuer_dropdown.setCurrentIndex(0)
+        # If only one issuer available, auto-select it
+        if issuer_count == 1:
+            self._issuer_dropdown.setCurrentIndex(1)
+
 
 
 # --------------------------------------------------------------------------

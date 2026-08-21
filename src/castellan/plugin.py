@@ -50,6 +50,7 @@ class CastellanPlugin(
 
     def _build_pages(self, app: "LocksmithApplication") -> None:
         """Instantiate all castellan page widgets."""
+        from .schema.list import SchemaListPage
         from .credentials.issued.list import IssuedCredentialsListPage
         from .credentials.received.list import ReceivedCredentialsListPage
         from .setup import CastellanAdminSetupPage
@@ -57,10 +58,11 @@ class CastellanPlugin(
         castellan_setup = CastellanAdminSetupPage(app, self.parent)
 
         self._pages = {
+            "castellan_schema": SchemaListPage(app, None),
             "castellan_issued_credentials": IssuedCredentialsListPage(app, None),
             "castellan_received_credentials": ReceivedCredentialsListPage(app, None),
             "castellan_setup": castellan_setup,
-            "castellan_placeholder": castellanPlaceholderPage("castellan", None),
+            "castellan_placeholder": CastellanPlaceholderPage("castellan", None),
         }
 
         castellan_setup.setup_complete_clicked.connect(self._on_setup_complete_event)
@@ -110,8 +112,9 @@ class CastellanPlugin(
         items.append(MenuSpacer(15))
 
         nav_buttons_config = [
-            (":/assets/material-icons/out-badge.svg", "Issued Credentials", "castellan_issued_credentials"),
-            (":/assets/material-icons/in-badge.svg", "Received Credentials", "castellan_received_credentials"),
+            (":/assets/material-icons/schema.svg", "Schema", "castellan_schema"),
+            (":/assets/material-icons/badge_outgoing.svg", "Issued Credentials", "castellan_issued_credentials"),
+            (":/assets/material-icons/badge_incoming.svg", "Received Credentials", "castellan_received_credentials"),
         ]
 
         self._nav_buttons_by_page = {}
@@ -164,7 +167,7 @@ class CastellanPlugin(
 
         _, settings = next(self._db.castellan_settings.getItemIter(), (None, None))  # type: ignore
         vault.plugin_state["castellan"] = {
-            "settngs": settings,
+            "settings": settings,
             "essr": None,
             "db": self._db,
         }
@@ -218,15 +221,17 @@ class CastellanPlugin(
     @staticmethod
     def reset_essr(vault: "Vault") -> None:
         """Reset ESSR client with current account hab."""
-        state = vault.plugin_state.get("castellan", {})
+        state = vault.plugin_state["castellan"]
         settings = state.get("settings")
         if settings is None:
             logger.warning("Cannot reset ESSR: no settings configured")
             return
-        hab = vault.hby.habs.get(settings.castellan_aid)
+        hab = vault.hby.habs.get(settings.issuer_aid)
         if hab is None:
-            logger.warning(f"Cannot reset ESSR: hab not found for aid {settings.castellan_aid}")
+            logger.warning(f"Cannot reset ESSR: hab not found for aid {settings.issuer_aid}")
             return
+
+        logger.info(f"Resetting ESSR for registrar {settings.registrar_url} to {settings.registrar_aid}")
 
         state["essr"] = APIClient(
             url=settings.registrar_url,
@@ -236,7 +241,7 @@ class CastellanPlugin(
         )
 
 
-class castellanPlaceholderPage(QWidget):
+class CastellanPlaceholderPage(QWidget):
     """Placeholder page for castellan sub-pages (to be implemented later)."""
 
     def __init__(self, title: str, parent=None):
