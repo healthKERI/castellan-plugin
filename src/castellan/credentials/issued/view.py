@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 from keri import help
 
-from locksmith.ui.toolkit.widgets import LocksmithDialog, LocksmithButton
+from locksmith.ui.toolkit.widgets import (
+    LocksmithDialog, LocksmithButton,
+    EditableTextLabelValue, EditableURLLabelValue, EditableEmailLabelValue,
+    EditableAddressLabelValue, EditableDateLabelValue, EditablePhoneLabelValue
+)
 from locksmith.ui.toolkit.widgets.fields import LocksmithLineEdit, LocksmithPlainTextEdit
 from locksmith.ui.toolkit.widgets.buttons import LocksmithCopyButton
 
@@ -39,6 +43,26 @@ class ViewIssuedCredentialDialog(LocksmithDialog):
         self._add_field_row(layout, "Recipient", credential.get('recipient', ''), monospace=True)
         self._add_field_row(layout, "Status", credential.get('status', '').capitalize())
         self._add_field_row(layout, "Issued Date", credential.get('created_at', ''))
+
+        # Display dynamic fields if present
+        dynamic_fields = credential.get('dynamic_fields', [])
+        if dynamic_fields:
+            # Add spacing before dynamic fields section
+            layout.addSpacing(8)
+
+            # Add section header
+            dynamic_header = QLabel("Additional Fields")
+            dynamic_header.setStyleSheet("font-weight: bold; font-size: 13px; color: #636466;")
+            layout.addWidget(dynamic_header)
+
+            # Add each dynamic field
+            for field_data in dynamic_fields:
+                if isinstance(field_data, dict) and field_data.get('label') and field_data.get('value'):
+                    field_widget = self._create_readonly_dynamic_field(field_data)
+                    layout.addWidget(field_widget)
+
+            # Add spacing after dynamic fields section
+            layout.addSpacing(8)
 
         sad_label = QLabel("SAD")
         sad_label.setStyleSheet("font-weight: bold; font-size: 13px;")
@@ -88,3 +112,39 @@ class ViewIssuedCredentialDialog(LocksmithDialog):
             row.addWidget(copy_btn)
 
         layout.addLayout(row)
+
+    @staticmethod
+    def _create_readonly_dynamic_field(field_data: dict) -> QWidget:
+        """
+        Create a read-only dynamic field widget based on field type.
+
+        Args:
+            field_data: Dict with 'label', 'value', and 'type' keys
+
+        Returns:
+            Read-only widget displaying the field
+        """
+        label = field_data.get('label', 'Field')
+        value = field_data.get('value', '')
+        field_type = field_data.get('type', 'text').lower()
+
+        # Map type to appropriate component class
+        type_map = {
+            'text': EditableTextLabelValue,
+            'url': EditableURLLabelValue,
+            'email': EditableEmailLabelValue,
+            'address': EditableAddressLabelValue,
+            'date': EditableDateLabelValue,
+            'phone': EditablePhoneLabelValue,
+        }
+
+        # Get component class (default to text if unknown type)
+        ComponentClass = type_map.get(field_type, EditableTextLabelValue)
+
+        # Create component with label and value
+        field_widget = ComponentClass(label=label, value=value)
+
+        # Set to read-only mode (no click-to-edit)
+        field_widget.setReadOnly(True)
+
+        return field_widget

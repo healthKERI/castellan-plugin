@@ -4,17 +4,16 @@ castellan.credentials.issued.list module
 
 Issued credentials list page — shows issued credentials stored on the Castellan server.
 """
-import json
 from typing import Any, TYPE_CHECKING
 
 import qasync
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout
 from PySide6.QtGui import QPalette, QColor
 from keri import help
+from keri.help import helping
 
 from locksmith.ui import colors
 from locksmith.ui.toolkit.tables import PaginatedTableWidget
-from locksmith.ui.toolkit.widgets import LocksmithDialog, LocksmithButton, LocksmithInvertedButton
 
 from ...core import remoting
 from .upload import UploadIssuedCredentialsDialog
@@ -53,10 +52,11 @@ class IssuedCredentialsListPage(QWidget):
             title="Issued Credentials",
             icon_path=":/assets/material-icons/out-badge.svg",
             show_add_button=True,
-            add_button_text="Upload Credential(s)",
-            row_actions=["View", "Delete"],
+            add_button_text="Upload Credential",
+            row_actions=["View", "Edit", "Delete"],
             row_action_icons={
                 "View": ":/assets/material-icons/view.svg",
+                "Edit": ":/assets/material-icons/edit.svg",
                 "Delete": ":/assets/material-icons/delete.svg",
             },
             items_per_page=10,
@@ -82,7 +82,7 @@ class IssuedCredentialsListPage(QWidget):
     def _transform_credential_to_row(self, credential: dict[str, Any]) -> dict[str, Any]:
         said = credential.get('said', '')
         schema = credential.get('schema', {})
-        created_at = credential.get('created_at', '')
+        created_at = helping.fromIso8601(credential.get('created_at', '')).strftime("%b %d, %Y %I:%M %p")
 
         row_data = {
             'Schema': schema.get('title', ''),
@@ -145,8 +145,10 @@ class IssuedCredentialsListPage(QWidget):
         said = row_data.get('_said', '')
         if action == "View":
             self._view_credential(said)
+        elif action == "Edit":
+            self._edit_credential(said)
         elif action == "Delete":
-            self._confirm_delete_credential(said)
+            self._on_delete_credential(row_data)
 
     def _view_credential(self, said: str):
         credential = self._credentials_cache.get(said)
@@ -156,47 +158,56 @@ class IssuedCredentialsListPage(QWidget):
         dialog = ViewIssuedCredentialDialog(credential=credential, parent=self)
         dialog.show()
 
-    def _confirm_delete_credential(self, said: str):
-        content = QWidget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(0, 10, 0, 0)
-        label = QLabel("Remove this credential from the Castellan server?")
-        label.setStyleSheet("font-size: 13px;")
-        label.setWordWrap(True)
-        layout.addWidget(label)
+    def _edit_credential(self, said: str):
+        """Open edit dialog for a credential's dynamic fields."""
+        from .edit import EditIssuedCredentialDialog
 
-        button_row = QHBoxLayout()
-        button_row.addStretch()
-        no_btn = LocksmithInvertedButton("No")
-        yes_btn = LocksmithButton("Yes")
-        button_row.addWidget(no_btn)
-        button_row.addWidget(yes_btn)
+        credential = self._credentials_cache.get(said)
+        if not credential:
+            logger.error(f"Credential {said} not in cache")
+            return
 
-        dialog = LocksmithDialog(
+        dialog = EditIssuedCredentialDialog(
+            app=self.app,
+            credential=credential,
+            on_success=self._on_credential_edited,
             parent=self,
-            title="Remove Credential",
-            title_icon=":/assets/material-icons/delete.svg",
-            content=content,
-            buttons=button_row,
         )
-        no_btn.clicked.connect(dialog.close)
-        yes_btn.clicked.connect(lambda: self._delete_credential(said, dialog))
         dialog.show()
 
-    def _delete_credential(self, said: str, dialog: LocksmithDialog):
-        dialog.close()
-        self._do_delete_credential(said)
+    def _on_credential_edited(self):
+        """Callback after successful credential edit."""
+        self._refresh_table()
 
-    @qasync.asyncSlot()
-    async def _do_delete_credential(self, said: str):
-        try:
-            result = await remoting.delete_issued_credential(self.app, said)
-            if result.get('success'):
-                self._refresh_table()
-            else:
-                logger.error(f"Delete failed: {result.get('error')}")
-        except Exception as e:
-            logger.exception(f"Error deleting credential: {e}")
+    def _on_delete_credential(self, row_data: dict[str, Any]):
+        """Handle Delete credential action."""
+        from .delete import DeleteIssuedCredentialDialog
+
+        credential_said = row_data.get('_said', '')
+        schema_title = row_data.get('Schema', '')
+
+        if not credential_said:
+            logger.error("Cannot delete: no credential SAID found")
+            return
+
+        # Use schema title as credential name, fallback to SAID prefix if missing
+        credential_name = schema_title if schema_title else credential_said[:12]
+
+        logger.info(f"Opening delete dialog for credential: {credential_name}")
+
+        dialog = DeleteIssuedCredentialDialog(
+            app=self.app,
+            credential_name=credential_name,
+            credential_said=credential_said,
+            on_success=self._on_credential_deleted,
+            parent=self._parent
+        )
+        dialog.open()
+
+    def _on_credential_deleted(self, credential_said: str):
+        """Handle successful credential deletion."""
+        logger.info(f"Credential {credential_said} deleted, reloading list")
+        self._refresh_table()
 
     def set_vault_name(self, vault_name: str):
         self.vault_name = vault_name
