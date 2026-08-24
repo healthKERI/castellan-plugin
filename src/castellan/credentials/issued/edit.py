@@ -8,18 +8,21 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import qasync
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
 from keri import help
-
+from keri.app import connecting
+from keri.help import helping
+from locksmith.ui import colors
 from locksmith.ui.toolkit.widgets import (
     LocksmithDialog, LocksmithButton, LocksmithInvertedButton,
     EditableTextLabelValue, EditableURLLabelValue, EditableEmailLabelValue,
     EditableAddressLabelValue, EditableDateLabelValue, EditablePhoneLabelValue
 )
-from locksmith.ui.toolkit.widgets.fields import FloatingLabelComboBox, LocksmithLineEdit
 from locksmith.ui.toolkit.widgets.buttons import LocksmithCopyButton
+from locksmith.ui.toolkit.widgets.fields import FloatingLabelComboBox, LocksmithLineEdit
+
 from ...core import remoting
 
 if TYPE_CHECKING:
@@ -52,10 +55,10 @@ class DynamicFieldWidget(QWidget):
             delete_btn.setIcon(QIcon(":/assets/material-icons/delete.svg"))
             delete_btn.setFixedSize(32, 32)
             delete_btn.setStyleSheet("border: none; background: transparent;")
-            delete_btn.setCursor(Qt.PointingHandCursor)
+            delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             delete_btn.setToolTip("Delete field")
             delete_btn.clicked.connect(self.delete_requested.emit)
-            layout.addWidget(delete_btn, alignment=Qt.AlignTop)
+            layout.addWidget(delete_btn, alignment=Qt.AlignmentFlag.AlignTop)
 
     def label(self) -> str:
         """Get the field label."""
@@ -77,6 +80,8 @@ class EditIssuedCredentialDialog(LocksmithDialog):
         parent: "VaultPage | None" = None,
     ):
         self.app = app
+        self.org = connecting.Organizer(hby=self.app.vault.hby)
+
         self.credential = credential
         self.on_success = on_success
         self._is_saving = False
@@ -89,7 +94,7 @@ class EditIssuedCredentialDialog(LocksmithDialog):
         self._content_layout.setSpacing(12)
 
         # Section 1: Read-only credential metadata
-        self._add_readonly_metadata()
+        self._build_credential_info_section(self._content_layout, credential)
 
         # Section 2: Editable dynamic fields
         self._add_dynamic_fields_section()
@@ -117,25 +122,156 @@ class EditIssuedCredentialDialog(LocksmithDialog):
             buttons=button_row,
         )
 
-        self.setFixedSize(600, 800)
+        self.setFixedSize(700, 800)
         self._adjust_dialog_height()
 
-    def _add_readonly_metadata(self):
-        """Add read-only credential metadata section."""
-        metadata_label = QLabel("Credential Information")
-        metadata_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #636466;")
-        self._content_layout.addWidget(metadata_label)
+    def _build_credential_info_section(self, layout, credential):
+        """Build the credential information section as a bordered, rounded QFrame."""
+        schema = credential.get('schema', {})
+        schema_title = schema.get('title', '')
 
-        said = self.credential.get('said', '')
-        schema = self.credential.get('schema', {})
+        info_frame = QFrame()
+        info_frame.setStyleSheet(f"""
+            QFrame {{
+                border: 2px solid {colors.BORDER};
+                border-radius: 8px;
+                background-color: {colors.BACKGROUND_CONTENT};
+            }}
+        """)
+        info_layout = QVBoxLayout(info_frame)
+        info_layout.setContentsMargins(10, 10, 10, 10)
+        info_layout.setSpacing(10)
 
-        self._add_field_row("SAID", said, monospace=True, copyable=True)
-        self._add_field_row("Schema", schema.get('title', ''))
-        self._add_field_row("Issuer", self.credential.get('issuer', ''), monospace=True)
-        self._add_field_row("Recipient", self.credential.get('recipient', ''), monospace=True)
+        # Title
+        info_title = QLabel("Credential Information")
+        info_title.setStyleSheet("font-weight: bold; font-size: 14px; border: none;")
+        info_layout.addWidget(info_title)
 
-        # Add spacing before dynamic fields section
-        self._content_layout.addSpacing(8)
+        # Schema
+        schema_row = QHBoxLayout()
+        schema_label = QLabel("Schema:")
+        schema_label.setStyleSheet("font-weight: 500; font-size: 13px; border: none;")
+        schema_row.addWidget(schema_label)
+
+        schema_value = QLabel(schema_title)
+        schema_value.setStyleSheet("font-size: 13px; border: none;")
+        schema_row.addWidget(schema_value)
+        schema_row.addStretch()
+        info_layout.addLayout(schema_row)
+
+        # Issuer
+        issuer_pre = credential['sad']['i']
+        issuer_alias = None
+        try:
+            for hab_pre, hab in self.app.vault.hby.habs.items():
+                if hab.pre == issuer_pre:
+                    issuer_alias = hab.name
+                    break
+        except:
+            pass
+
+        issuer_label = QLabel("Issuer")
+        issuer_label.setStyleSheet("font-weight: bold; font-size: 14px; border: none; margin-top: 10px;")
+        info_layout.addWidget(issuer_label)
+
+        issuer_container = QWidget()
+        issuer_container.setStyleSheet("border: none;")
+        issuer_inner_layout = QVBoxLayout(issuer_container)
+        issuer_inner_layout.setContentsMargins(20, 0, 0, 0)
+        issuer_inner_layout.setSpacing(5)
+
+        issuer_alias_row = QHBoxLayout()
+        issuer_alias_label = QLabel("Alias:")
+        issuer_alias_label.setStyleSheet("font-weight: 500; font-size: 13px; border: none;")
+        issuer_alias_row.addWidget(issuer_alias_label)
+        issuer_alias_value = QLabel(issuer_alias if issuer_alias else "N/A")
+        issuer_alias_value.setStyleSheet("font-size: 13px; border: none;")
+        issuer_alias_row.addWidget(issuer_alias_value)
+        issuer_alias_row.addStretch()
+        issuer_inner_layout.addLayout(issuer_alias_row)
+
+        issuer_aid_row = QHBoxLayout()
+        issuer_aid_label = QLabel("AID:")
+        issuer_aid_label.setStyleSheet("font-weight: 500; font-size: 13px; border: none;")
+        issuer_aid_row.addWidget(issuer_aid_label)
+        issuer_aid_value = QLabel(issuer_pre)
+        issuer_aid_value.setStyleSheet("font-size: 13px; border: none;")
+        issuer_aid_value.setWordWrap(True)
+        issuer_aid_row.addWidget(issuer_aid_value)
+        issuer_aid_row.addStretch()
+        issuer_inner_layout.addLayout(issuer_aid_row)
+
+        info_layout.addWidget(issuer_container)
+
+        # Recipient
+        recp = credential.get('recipient', '')
+        recipient_pre = credential['sad']['a']['i']
+        recipient_alias = None
+        if (remote_id := self.org.get(recp)) is not None:
+            recipient_alias = f'{remote_id['alias']}'
+
+        recipient_label = QLabel("Recipient")
+        recipient_label.setStyleSheet("font-weight: bold; font-size: 14px; border: none; margin-top: 10px;")
+        info_layout.addWidget(recipient_label)
+
+        recipient_container = QWidget()
+        recipient_container.setStyleSheet("border: none;")
+        recipient_inner_layout = QVBoxLayout(recipient_container)
+        recipient_inner_layout.setContentsMargins(20, 0, 0, 0)
+        recipient_inner_layout.setSpacing(5)
+
+        recipient_alias_row = QHBoxLayout()
+        recipient_alias_label = QLabel("Alias:")
+        recipient_alias_label.setStyleSheet("font-weight: 500; font-size: 13px; border: none;")
+        recipient_alias_row.addWidget(recipient_alias_label)
+        recipient_alias_value = QLabel(recipient_alias if recipient_alias else "N/A")
+        recipient_alias_value.setStyleSheet("font-size: 13px; border: none;")
+        recipient_alias_row.addWidget(recipient_alias_value)
+        recipient_alias_row.addStretch()
+        recipient_inner_layout.addLayout(recipient_alias_row)
+
+        recipient_aid_row = QHBoxLayout()
+        recipient_aid_label = QLabel("AID:")
+        recipient_aid_label.setStyleSheet("font-weight: 500; font-size: 13px; border: none;")
+        recipient_aid_row.addWidget(recipient_aid_label)
+        recipient_aid_value = QLabel(recipient_pre)
+        recipient_aid_value.setStyleSheet("font-size: 13px; border: none;")
+        recipient_aid_value.setWordWrap(True)
+        recipient_aid_row.addWidget(recipient_aid_value)
+        recipient_aid_row.addStretch()
+        recipient_inner_layout.addLayout(recipient_aid_row)
+
+        info_layout.addWidget(recipient_container)
+
+        # Status
+        status_text = credential.get("status", {})
+
+        status_row = QHBoxLayout()
+        status_label = QLabel("Status:")
+        status_label.setStyleSheet("font-weight: 500; font-size: 13px; border: none;")
+        status_row.addWidget(status_label)
+
+        status_value = QLabel(status_text)
+        status_value.setStyleSheet("font-size: 13px; border: none;")
+        status_row.addWidget(status_value)
+        status_row.addStretch()
+        info_layout.addLayout(status_row)
+
+        # Issued Date
+        dt = helping.fromIso8601(credential.get('created_at', ''))
+
+        date_row = QHBoxLayout()
+        date_label = QLabel("Issued Date:")
+        date_label.setStyleSheet("font-weight: 500; font-size: 13px; border: none;")
+        date_row.addWidget(date_label)
+
+        date_value = QLabel(dt.strftime("%b %d, %Y %I:%M %p"))
+        date_value.setStyleSheet("font-size: 13px; border: none;")
+        date_row.addWidget(date_value)
+        date_row.addStretch()
+        info_layout.addLayout(date_row)
+
+        layout.addWidget(info_frame)
 
     def _add_field_row(self, label: str, value: str, monospace: bool = False, copyable: bool = False):
         """Add a read-only field row."""
