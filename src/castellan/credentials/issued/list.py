@@ -10,6 +10,7 @@ import qasync
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from PySide6.QtGui import QPalette, QColor
 from keri import help
+from keri.app import connecting
 from keri.help import helping
 
 from locksmith.ui import colors
@@ -80,13 +81,22 @@ class IssuedCredentialsListPage(QWidget):
         layout.addWidget(self.table)
 
     def _transform_credential_to_row(self, credential: dict[str, Any]) -> dict[str, Any]:
+        org = connecting.Organizer(hby=self.app.vault.hby)
+
         said = credential.get('said', '')
         schema = credential.get('schema', {})
         created_at = helping.fromIso8601(credential.get('created_at', '')).strftime("%b %d, %Y %I:%M %p")
 
+        recp = credential.get('recipient', '')
+        recipient_name = f'Unknown ({recp})'
+        if (recipient_hab := self.app.vault.hby.habByPre(recp)) is not None:
+            recipient_name = f'{recipient_hab.name} ({recp})'
+        elif (remote_id := org.get(recp)) is not None:
+            recipient_name = f'{remote_id['alias']} ({recp})'
+
         row_data = {
             'Schema': schema.get('title', ''),
-            'Recipient': credential.get('recipient', ''),
+            'Recipient': recipient_name,
             'Status': credential.get('status', '').capitalize(),
             'Issued Date': created_at,
             '_said': said,
@@ -155,7 +165,7 @@ class IssuedCredentialsListPage(QWidget):
         if not credential:
             logger.error(f"Credential {said} not in cache")
             return
-        dialog = ViewIssuedCredentialDialog(credential=credential, parent=self)
+        dialog = ViewIssuedCredentialDialog(app=self.app, credential=credential, parent=self)
         dialog.show()
 
     def _edit_credential(self, said: str):

@@ -109,9 +109,9 @@ class CastellanPlugin(
         items.append(MenuSpacer(10))
 
         nav_buttons_config = [
-            (":/assets/material-icons/schema.svg", "Schema", "castellan_schema"),
             (":/assets/material-icons/badge_outgoing.svg", "Issued Credentials", "castellan_issued_credentials"),
             (":/assets/material-icons/badge_incoming.svg", "Received Credentials", "castellan_received_credentials"),
+            (":/assets/material-icons/schema.svg", "Schema", "castellan_schema"),
         ]
 
         self._nav_buttons_by_page = {}

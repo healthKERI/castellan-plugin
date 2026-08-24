@@ -117,7 +117,7 @@ class EditIssuedCredentialDialog(LocksmithDialog):
             buttons=button_row,
         )
 
-        self.setFixedWidth(530)
+        self.setFixedSize(600, 800)
         self._adjust_dialog_height()
 
     def _add_readonly_metadata(self):
@@ -259,14 +259,14 @@ class EditIssuedCredentialDialog(LocksmithDialog):
     def _adjust_dialog_height(self):
         """Adjust dialog height based on number of dynamic fields."""
         # Base height includes: metadata section + headers + dropdown + buttons
-        base_height = 450
+        base_height = 800
 
         # Each field adds approximately 60px
         field_height = 60
         additional_height = len(self._dynamic_fields) * field_height
 
         # Cap at 700px to prevent dialog from being too tall
-        new_height = min(base_height + additional_height, 700)
+        new_height = min(base_height + additional_height, 950)
         self.setFixedHeight(new_height)
         self.center_on_parent()
 
