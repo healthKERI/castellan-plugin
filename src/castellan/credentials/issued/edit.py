@@ -122,7 +122,10 @@ class EditIssuedCredentialDialog(LocksmithDialog):
             buttons=button_row,
         )
 
-        self.setFixedSize(700, 800)
+        # Set fixed width only, allow height to be dynamic
+        self.setFixedWidth(530)
+        self.setMinimumHeight(400)  # Minimum viable height
+        self.setMaximumHeight(950)  # Cap at 950px as before
         self._adjust_dialog_height()
 
     def _build_credential_info_section(self, layout, credential):
@@ -350,6 +353,10 @@ class EditIssuedCredentialDialog(LocksmithDialog):
         # Create component with label and value
         field_component = ComponentClass(label=label, value=value)
 
+        # Connect to editModeChanged signal for address fields to adjust dialog height
+        if isinstance(field_component, EditableAddressLabelValue):
+            field_component.editModeChanged.connect(self._on_address_edit_mode_changed)
+
         # Wrap in DynamicFieldWidget with delete button
         wrapper = DynamicFieldWidget(field_component, deletable=deletable)
         wrapper.delete_requested.connect(lambda w=wrapper: self._on_delete_field(w))
@@ -392,18 +399,63 @@ class EditIssuedCredentialDialog(LocksmithDialog):
             field_widget.deleteLater()
             self._adjust_dialog_height()
 
+    def _on_address_edit_mode_changed(self, mode: str):
+        """
+        Handle address widget edit mode changes.
+
+        When an address field enters edit mode, it expands from ~40px to ~220px.
+        We resize the dialog FIRST, then let layout recalculate with correct space.
+
+        Args:
+            mode: The new edit mode ('display', 'edit_value', or 'edit_label')
+        """
+        # CRITICAL: Adjust dialog height FIRST, before layout recalculation
+        # This ensures the dialog has enough space for the expanded widget
+        self._adjust_dialog_height()
+
+        # Now force layout recalculation with new dialog size
+        content_widget = self._content_layout.parentWidget()
+        if content_widget:
+            content_widget.updateGeometry()
+            if content_widget.layout():
+                content_widget.layout().activate()
+
+        # Update scroll area to new content size
+        if hasattr(self, 'scroll_area'):
+            self.scroll_area.updateGeometry()
+            # Force scroll area to recalculate viewport size
+            self.scroll_area.widget().adjustSize()
+
+        # Process any pending layout events
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
+
     def _adjust_dialog_height(self):
-        """Adjust dialog height based on number of dynamic fields."""
-        # Base height includes: metadata section + headers + dropdown + buttons
-        base_height = 800
+        """Adjust dialog height based on actual dynamic field sizes."""
+        # Calculate base height: info section + headers + dropdown + buttons + margins
+        base_height = 500  # Approximate base without dynamic fields
 
-        # Each field adds approximately 60px
-        field_height = 60
-        additional_height = len(self._dynamic_fields) * field_height
+        # Calculate actual height needed for dynamic fields
+        fields_height = 0
+        for field_widget in self._dynamic_fields:
+            widget_height = field_widget.sizeHint().height()
+            fields_height += widget_height + 12  # Add spacing
 
-        # Cap at 700px to prevent dialog from being too tall
-        new_height = min(base_height + additional_height, 950)
-        self.setFixedHeight(new_height)
+        # Calculate total content height needed
+        content_height = base_height + fields_height
+
+        # Clamp to min/max bounds
+        new_height = max(400, min(content_height, 950))
+
+        # Set both min and max to lock height at calculated value
+        # Using setMinimum/Maximum instead of setFixedHeight allows future calls to change height
+        self.setMinimumHeight(new_height)
+        self.setMaximumHeight(new_height)
+
+        # Force geometry update to propagate changes
+        self.updateGeometry()
+
+        # Center on parent after resize
         self.center_on_parent()
 
     def _create_button_row(self) -> QHBoxLayout:
