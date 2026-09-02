@@ -10,6 +10,9 @@ import qasync
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 from PySide6.QtGui import QPalette, QColor
 from keri import help
+from keri.app import connecting
+from keri.core import coring
+from keri.help import helping
 
 from locksmith.ui import colors
 from locksmith.ui.toolkit.tables import PaginatedTableWidget
@@ -49,8 +52,8 @@ class ReceivedCredentialsListPage(QWidget):
         self.setAutoFillBackground(True)
 
         self.table = PaginatedTableWidget(
-            columns=["Schema", "Issuer", "Status", "Received Date"],
-            column_widths={"Schema": 220, "Status": 110, "Received Date": 165, "Actions": 50},
+            columns=["Schema", "Issuer", "Status (Local)", "Received Date"],
+            column_widths={"Schema": 220, "Status (Local)": 125, "Received Date": 165, "Actions": 50},
             title="Received Credentials",
             icon_path=":/assets/material-icons/in-badge.svg",
             show_add_button=True,
@@ -82,14 +85,43 @@ class ReceivedCredentialsListPage(QWidget):
         layout.addWidget(self.table)
 
     def _transform_credential_to_row(self, credential: dict[str, Any]) -> dict[str, Any]:
+        org = connecting.Organizer(hby=self.app.vault.hby)
+
+        sad = credential.get('sad', '')
         said = credential.get('said', '')
         schema_title = credential.get('schema_title')
-        created_at = credential.get('created_at', '')
+        created_at = helping.fromIso8601(credential.get('created_at', '')).strftime("%b %d, %Y %I:%M %p")
+        remote_status = credential.get('status', '').capitalize()
+
+        issr = credential.get('issuer', '')
+        issuer_name = f'Unknown ({issr})'
+        if (issuer_hab := self.app.vault.hby.habByPre(issr)) is not None:
+            issuer_name = f'{issuer_hab.name} ({issr})'
+        elif (remote_id := org.get(issr)) is not None:
+            issuer_name = f'{remote_id['alias']} ({issr})'
+
+        regk = sad.get('ri')
+        status = self.app.rgy.tevers[regk].vcState(said)
+        if status.et in [coring.Ilks.rev, coring.Ilks.brv]:
+            if remote_status == "Issued":
+                status_text = "Issued (Revoked)"
+                status_color = colors.DANGER
+            else:
+                status_text = "Revoked (Revoked)"
+                status_color = colors.WARNING_TEXT
+        else:
+            if remote_status == "Issued":
+                status_text = "Issued (Issued)"
+                status_color = colors.SUCCESS_INDICATOR
+            else:
+                status_text = "Revoked (Issued)"
+                status_color = colors.DANGER
 
         row_data = {
             'Schema': schema_title,
-            'Issuer': credential.get('issuer', ''),
-            'Status': credential.get('status', '').capitalize(),
+            'Issuer': issuer_name,
+            'Status (Local)': status_text,
+            'Status (Local)_color': status_color,
             'Received Date': created_at,
             '_said': said,
         }
