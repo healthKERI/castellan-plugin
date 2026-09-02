@@ -7,22 +7,20 @@ Received credentials list page — shows received credentials stored on the Cast
 from typing import Any, TYPE_CHECKING
 
 import qasync
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 from PySide6.QtGui import QPalette, QColor
+from PySide6.QtWidgets import QWidget, QVBoxLayout
 from keri import help
 from keri.app import connecting
 from keri.core import coring
 from keri.help import helping
-
 from locksmith.ui import colors
 from locksmith.ui.toolkit.tables import PaginatedTableWidget
-from locksmith.ui.toolkit.widgets import LocksmithDialog, LocksmithButton, LocksmithInvertedButton
 
-from ...core import remoting
+from .delete import DeleteReceivedCredentialDialog
+from .edit import EditReceivedCredentialDialog
 from .upload import UploadReceivedCredentialsDialog
 from .view import ViewReceivedCredentialDialog
-from .edit import EditReceivedCredentialDialog
-from .delete import DeleteReceivedCredentialDialog
+from ...core import remoting
 
 if TYPE_CHECKING:
     from locksmith.ui.vault.page import VaultPage
@@ -91,7 +89,6 @@ class ReceivedCredentialsListPage(QWidget):
         said = credential.get('said', '')
         schema_title = credential.get('schema_title')
         created_at = helping.fromIso8601(credential.get('created_at', '')).strftime("%b %d, %Y %I:%M %p")
-        remote_status = credential.get('status', '').capitalize()
 
         issr = credential.get('issuer', '')
         issuer_name = f'Unknown ({issr})'
@@ -100,22 +97,12 @@ class ReceivedCredentialsListPage(QWidget):
         elif (remote_id := org.get(issr)) is not None:
             issuer_name = f'{remote_id['alias']} ({issr})'
 
-        regk = sad.get('ri')
-        status = self.app.rgy.tevers[regk].vcState(said)
-        if status.et in [coring.Ilks.rev, coring.Ilks.brv]:
-            if remote_status == "Issued":
-                status_text = "Issued (Revoked)"
-                status_color = colors.DANGER
-            else:
-                status_text = "Revoked (Revoked)"
-                status_color = colors.WARNING_TEXT
-        else:
-            if remote_status == "Issued":
-                status_text = "Issued (Issued)"
-                status_color = colors.SUCCESS_INDICATOR
-            else:
-                status_text = "Revoked (Issued)"
-                status_color = colors.DANGER
+        remote_status = credential.get('status', '').capitalize()
+        local_status = self._local_credential_status(self.app, said, sad)
+
+        is_out_of_sync = local_status is not None and local_status != remote_status
+        status_text = f"{remote_status} ({local_status})" if local_status is not None else remote_status
+        status_color = colors.DANGER if is_out_of_sync else colors.SUCCESS_INDICATOR
 
         row_data = {
             'Schema': schema_title,
@@ -124,10 +111,31 @@ class ReceivedCredentialsListPage(QWidget):
             'Status (Local)_color': status_color,
             'Received Date': created_at,
             '_said': said,
+            '_out_of_sync': is_out_of_sync,
+            '_local_status': local_status.lower() if local_status is not None else None,
         }
+
+        if is_out_of_sync:
+            tooltip = (
+                f"Castellan server reports this credential as '{remote_status}', "
+                f"but it is '{local_status}' locally. Use 'Update' to sync the server."
+            )
+            for col in ("Schema", "Recipient", "Status (Local)", "Issued Date"):
+                row_data[f"{col}_tooltip"] = tooltip
 
         self._credentials_cache[said] = credential
         return row_data
+
+    @staticmethod
+    def _local_credential_status(app, said: str, sad) -> str | None:
+        """Determine local TEL status ('Issued'/'Revoked') for a credential, or None if unknown locally."""
+        try:
+            regk = sad.get('ri')
+            vc_state = app.rgy.tevers[regk].vcState(said)
+            return "Revoked" if vc_state.et in [coring.Ilks.rev, coring.Ilks.brv] else "Issued"
+        except Exception as e:
+            logger.debug(f"Could not determine local TEL state for {said}: {e}")
+            return None
 
     @qasync.asyncSlot(dict)
     async def _on_load_requested(self, params: dict):
