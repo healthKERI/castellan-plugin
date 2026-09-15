@@ -29,7 +29,7 @@ class DeleteIdentifierDialog(LocksmithResourceDeletionDialog):
         alias: str,
         aid: str,
         on_success: Callable[[str], None] | None = None,
-        parent: "VaultPage | None" = None,
+        parent = None,
     ):
         self.app = app
         self.alias = alias

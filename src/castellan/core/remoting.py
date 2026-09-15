@@ -14,7 +14,9 @@ import json
 import urllib.parse
 from typing import TYPE_CHECKING, Dict, Any, Optional
 
+from keri.core import parsing
 from keri.core.scheming import Schemer
+from keri.kering import Ilks
 from locksmith.core.credentialing import outputCred
 
 if TYPE_CHECKING:
@@ -1340,4 +1342,270 @@ async def update_account(
     except Exception as e:
         logger.error(f"Error updating account: {e}")
         return {'success': False, 'error': str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Multisig Identifiers
+# ---------------------------------------------------------------------------
+
+async def create_multisig_identifier(
+        app: "LocksmithApplication",
+        kel: bytes,
+        multisig_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Create a new multisig identifier on the Castellan server.
+
+    Args:
+        app: The Locksmith application instance
+        aid: The account AID for the multisig identifier
+        kel: The KEL file as bytes
+        multisig_data: Dictionary containing multisig configuration including:
+            - participants: List of account AIDs
+            - thresholds: Threshold configuration per account
+            - Any other multisig-specific fields
+
+    Returns:
+        Dict with 'success' boolean and optional 'error' or 'data' keys
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    files = {
+        'kel': ('output.bin', bytes(kel), 'application/octet-stream'),
+        'doc': ('data.json', json.dumps(multisig_data), 'application/json')
+    }
+
+    try:
+        response = await essr.request(
+            path="/multisig/identifiers",
+            method="POST",
+            files=files,
+            timeout=60,
+        )
+
+        if response is not None and response.status_code in (200, 201):
+            data = response.json() if response.content else {}
+            data['success'] = True
+            return data
+        else:
+            if response is not None:
+                logger.error(f"Create multisig failed with status {response.status_code}: {response.text}")
+                try:
+                    error_msg = response.json().get('description', f"Status {response.status_code}")
+                except Exception:
+                    error_msg = f"Status {response.status_code}"
+            else:
+                error_msg = "No response"
+            return {'success': False, 'error': error_msg}
+
+    except Exception as e:
+        logger.error(f"Error creating multisig identifier: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def join_multisig_identifier(
+        app: "LocksmithApplication",
+        multisig_id: str,
+        kel: bytes,
+        multisig_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Join a multisig identifier on the Castellan server.
+
+    Args:
+        app: The Locksmith application instance
+        multisig_id: The multisig identifier to join
+        kel: The KEL file as bytes
+        multisig_data: Dictionary containing my new member AID
+
+    Returns:
+        Dict with 'success' boolean and optional 'error' or 'data' keys
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    files = {
+        'kel': ('output.bin', bytes(kel), 'application/octet-stream'),
+        'doc': ('data.json', json.dumps(multisig_data), 'application/json')
+    }
+
+    try:
+        response = await essr.request(
+            path=f"/multisig/identifiers/{multisig_id}",
+            method="PUT",
+            files=files,
+            timeout=60,
+        )
+
+        if response is not None and response.status_code in (200, 201):
+            data = response.json() if response.content else {}
+            data['success'] = True
+            return data
+        else:
+            if response is not None:
+                logger.error(f"Join multisig failed with status {response.status_code}: {response.text}")
+                try:
+                    error_msg = response.json().get('description', f"Status {response.status_code}")
+                except Exception:
+                    error_msg = f"Status {response.status_code}"
+            else:
+                error_msg = "No response"
+            return {'success': False, 'error': error_msg}
+
+    except Exception as e:
+        logger.error(f"Error joining multisig identifier: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def add_multisig_signature_identifier(
+        app: "LocksmithApplication",
+        multisig_id: str,
+        icp: bytes,
+        multisig_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Join a multisig identifier on the Castellan server.
+
+    Args:
+        app: The Locksmith application instance
+        multisig_id: The multisig identifier to join
+        icp: The KEL file as bytes
+        multisig_data: Dictionary containing my new member AID
+
+    Returns:
+        Dict with 'success' boolean and optional 'error' or 'data' keys
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    files = {
+        'icp': ('output.bin', bytes(icp), 'application/octet-stream'),
+        'doc': ('data.json', json.dumps(multisig_data), 'application/json')
+    }
+
+    try:
+        response = await essr.request(
+            path=f"/multisig/identifiers/{multisig_id}/signatures",
+            method="POST",
+            files=files,
+            timeout=60,
+        )
+
+        if response is not None and response.status_code in (200, 201):
+            data = response.json() if response.content else {}
+            data['success'] = True
+            return data
+        else:
+            if response is not None:
+                logger.error(f"Add multisig signature failed with status {response.status_code}: {response.text}")
+                try:
+                    error_msg = response.json().get('description', f"Status {response.status_code}")
+                except Exception:
+                    error_msg = f"Status {response.status_code}"
+            else:
+                error_msg = "No response"
+            return {'success': False, 'error': error_msg}
+
+    except Exception as e:
+        logger.error(f"Error adding signature to multisig identifier: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+
+def get_multisig_state(app, identifier) -> str:
+    """Determine multisig state: 'pending', 'ready', or 'active'."""
+    aid = identifier.get('aid', '')
+    current_event = identifier.get("current_event", None)
+    key_state = identifier.get("key_state", None)
+    rotation_request = identifier.get("rotation_request", None)
+    my_member = get_my_member(app, identifier)
+
+    if identifier.get('aid') is None:
+        if all([member.get("member_aid", None) for member in identifier.get("members")]):
+            return "inception_ready"
+        if my_member.get("member_aid", None) is not None:
+            return "inception_joined"
+        else:
+            return "inception"
+
+    if rotation_request:
+        return "rotation" if has_joined(app, identifier) else "rotation_joined"
+
+    elif current_event:
+        ilk = current_event.get('t')
+        if ilk in (Ilks.icp, Ilks.dip):
+            return "inception_signed" if has_joined(app, identifier) else "inception_created"
+        elif ilk in (Ilks.rot, Ilks.drt):
+            return "rotation_signed" if has_joined(app, identifier) else "rotation_created"
+        else:
+            return "interact_signed" if has_joined(app, identifier) else "interact"
+
+    elif key_state:
+        if aid in app.hby.kevers:
+            kever = app.hby.kevers[aid]
+            return "live_behind" if kever.sner.num < int(key_state.get('s', '0'), 16) else "live"
+        else:
+            return "live_behind"
+    else:
+        return "single"
+
+def get_my_member(app, identifier) -> dict | None:
+    """Find current user's member object in the multisig, if present."""
+    my_account_aid = get_current_account_aid(app)
+    if not my_account_aid:
+        return None
+
+    members = identifier.get('members', [])
+    for member in members:
+        if member.get('account_aid') == my_account_aid:
+            return member
+
+    return None
+
+def get_current_account_aid(app) -> str:
+    """Get the current user's Castellan account AID."""
+    if not app or not app.vault:
+        return ""
+
+    account = app.vault.plugin_state.get("castellan", {}).get("account", {})
+    return account.get("aid", "")
+
+def is_member(app, identifier) -> bool:
+    """Check if current user is a member of this multisig."""
+    return get_my_member(app, identifier) is not None
+
+def has_approved(app, identifier) -> bool:
+    """Check if current user has joined the multisig."""
+    my_member = get_my_member(app, identifier)
+    return my_member is not None and my_member.get('member_aid') is not None
+
+def has_joined(app, identifier) -> bool:
+    """Check if current user has joined the multisig."""
+    my_member = get_my_member(app, identifier)
+    return has_approved(app, identifier) and my_member.get('public_key', None)
+
+async def load_multisig_member_kels(app, identifier):
+    """ Loop through all members of a multisig identifier and load the KELs of members who are not us."""
+
+    for member in identifier.get("members", []):
+        member_aid = member.get("member_aid")
+
+        if not member_aid:
+            raise ValueError("Member does not have a member_aid, multisig not ready to be completed")
+
+        # Don't need to process our own KEL
+        if member_aid in app.vault.hby.habs:
+            continue
+
+        result = await fetch_identifier_kel(app, member_aid)
+        if not result.get("success"):
+            raise ValueError(f"Error fetching KEL for {member_aid}: {result.get('error')}")
+
+        ims = bytearray(result.get("kel_bytes"))
+        parsing.Parser(kvy=app.vault.kvy, rvy=app.vault.hby.rvy, local=False).parse(ims)
+        app.vault.kvy.processEscrows()
+
+        if member_aid not in app.vault.kvy.kevers:
+            raise ValueError(f"Member {member_aid} KEL would not parse.")
 
