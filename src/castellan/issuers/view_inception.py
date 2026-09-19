@@ -696,11 +696,8 @@ class ViewIceptionMultisigIdentifierDialog(LocksmithDialog):
         self.show_success("Successfully joined the multisig!")
 
         # Update the identifier with the new data from the server
-        print(json.dumps(self.identifier, indent=2))
         self.identifier.update(result)
-        print(json.dumps(self.identifier, indent=2))
         self.state = remoting.get_multisig_state(self.app, self.identifier)
-        print(self.state)
         self.identifier["_state"] = self.state
 
         # Refresh the UI to show updated state

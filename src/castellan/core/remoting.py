@@ -1512,6 +1512,65 @@ async def add_multisig_signature_identifier(
         return {'success': False, 'error': str(e)}
 
 
+async def create_multisig_registry(
+    app: "LocksmithApplication",
+    multisig_id: str,
+    vcp_bytes: bytes,
+    ixn_bytes: bytes,
+    registry_name: str,
+) -> Dict[str, Any]:
+    """
+    Create a credential registry for a multisig identifier.
+
+    Args:
+        app: The Locksmith application instance
+        multisig_id: The multisig identifier AID (URL-encoded)
+        vcp_bytes: The VCP (registry inception) event bytes
+        ixn_bytes: The IXN (interaction) event bytes that anchor the VCP
+        registry_name: User-friendly name for the registry
+
+    Returns:
+        Dict with 'success' boolean and optional 'error' or 'data' keys
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        # Build multipart form with VCP, IXN, and body
+        files = {
+            'vcp': ('vcp.cesr', vcp_bytes, 'application/octet-stream'),
+            'ixn': ('ixn.cesr', ixn_bytes, 'application/octet-stream'),
+            'body': ('body.json', json.dumps({'name': registry_name}), 'application/json'),
+        }
+
+        # URL-encode the multisig_id
+        encoded_id = urllib.parse.quote(multisig_id, safe='')
+
+        response = await essr.request(
+            path=f"/multisig/identifiers/{encoded_id}/registries",
+            method="POST",
+            files=files,
+            timeout=60,
+        )
+
+        if response is not None and response.status_code in (200, 201):
+            return {'success': True, 'data': response.json() if response.content else {}}
+        else:
+            if response is not None:
+                logger.error(f"Create registry failed with status {response.status_code}: {response.text}")
+                try:
+                    error_msg = response.json().get('description', f"Status {response.status_code}")
+                except Exception:
+                    error_msg = f"Status {response.status_code}"
+            else:
+                error_msg = "No response"
+            return {'success': False, 'error': error_msg}
+
+    except Exception as e:
+        logger.exception(f"Error creating registry: {e}")
+        return {'success': False, 'error': str(e)}
+
 
 def get_multisig_state(app, identifier) -> str:
     """Determine multisig state: 'pending', 'ready', or 'active'."""
@@ -1519,6 +1578,7 @@ def get_multisig_state(app, identifier) -> str:
     current_event = identifier.get("current_event", None)
     key_state = identifier.get("key_state", None)
     rotation_request = identifier.get("rotation_request", None)
+    vcp = identifier.get("vcp", None)
     my_member = get_my_member(app, identifier)
 
     if identifier.get('aid') is None:
@@ -1531,6 +1591,10 @@ def get_multisig_state(app, identifier) -> str:
 
     if rotation_request:
         return "rotation" if has_joined(app, identifier) else "rotation_joined"
+
+    elif vcp:
+        # Registry creation in progress - behaves like inception states
+        return "registry_signed" if has_joined(app, identifier) else "registry_created"
 
     elif current_event:
         ilk = current_event.get('t')

@@ -37,7 +37,7 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
         content_widget = QWidget()
         self.content_layout = QVBoxLayout(content_widget)
         self.content_layout.setContentsMargins(0, 10, 0, 0)
-        self.content_layout.setSpacing(5)
+        self.content_layout.setSpacing(8)
 
         self._build_live_content()
 
@@ -69,7 +69,7 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
         )
 
         close_btn.clicked.connect(self._finished)
-        self.setFixedSize(650, 800)
+        self.setFixedSize(660, 800)
 
     def _finished(self):
         self.closed.emit()
@@ -114,7 +114,7 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
             f"font-family: {get_monospace_font_family()}; "
             "font-size: 12px; color: #636466;"
         )
-        value_widget.setWordWrap(True)
+        value_widget.setWordWrap(False)
         row.addWidget(value_widget)
 
         copy_btn = LocksmithCopyButton(copy_content=self.aid, icon_size=24)
@@ -182,6 +182,7 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
 
         # Signing threshold
         signing_layout = QVBoxLayout()
+        signing_layout.setSpacing(6)
         signing_label = QLabel("Signing Threshold")
         signing_label.setStyleSheet(f"font-size: 11px; color: {colors.TEXT_SUBTLE};")
         signing_value = QLabel(str(signing))
@@ -193,6 +194,7 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
 
         # Rotation threshold
         rotation_layout = QVBoxLayout()
+        rotation_layout.setSpacing(6)
         rotation_label = QLabel("Rotation Threshold")
         rotation_label.setStyleSheet(f"font-size: 11px; color: {colors.TEXT_SUBTLE};")
         rotation_value = QLabel(str(rotation))

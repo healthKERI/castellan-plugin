@@ -109,7 +109,7 @@ class ViewSingleIdentifierDialog(LocksmithDialog):
         value_widget.setStyleSheet(
             "font-family: 'Menlo', 'SF Mono', monospace; font-size: 12px; color: #636466;"
         )
-        value_widget.setWordWrap(True)
+        value_widget.setWordWrap(False)
         row.addWidget(value_widget)
         copy_btn = LocksmithCopyButton(copy_content=self.aid, icon_size=24)
         row.addWidget(copy_btn)
