@@ -8,6 +8,7 @@ Castellan server (self + peers).
 from typing import Any, Callable, TYPE_CHECKING
 
 import qasync
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QDialog
 from keri import help
@@ -19,9 +20,8 @@ from .upload import UploadIdentifierDialog
 from .view import ViewIdentifierDialog
 from .view_inception import ViewIceptionMultisigIdentifierDialog
 from .view_live import ViewLiveMultisigIdentifierDialog
-from .view_single import ViewSingleIdentifierDialog
-from .create_registry import CreateRegistryDialog
 from .view_registry import ViewRegistryCreationDialog
+from .view_single import ViewSingleIdentifierDialog
 from ..core import remoting
 from ..credentials.issued.list import _exec_dialog_async
 from ..credentials.issued.server_update import ServerUpdateDialog
@@ -34,6 +34,9 @@ logger = help.ogler.getLogger(__name__)
 
 class IdentifiersListPage(QWidget):
     """Paginated list of peer-discovery identifiers uploaded to the Castellan server."""
+
+    configure_multisig_clicked = Signal(str, dict)
+    synchronize_multisig_clicked = Signal(str, dict)
 
     def __init__(
         self,
@@ -66,11 +69,12 @@ class IdentifiersListPage(QWidget):
             icon_path=":/assets/material-icons/group.svg",
             show_add_button=True,
             add_button_text="Add Issuer",
-            row_actions=["View", "Update", "Delete"],
+            row_actions=["View", "Update", "Configure", "Delete"],
             row_action_icons={
                 "View": ":/assets/material-icons/view.svg",
                 "Update": ":/assets/material-icons/cloud_sync.svg",
-                "Create Registry": ":/assets/material-icons/shield_lock.svg",
+                "Configure": ":/assets/material-icons/group.svg",
+                "Synchronize": ":/assets/material-icons/sync_lock.svg",
                 "Delete": ":/assets/material-icons/delete.svg",
             },
             row_actions_callback=self._get_row_actions,
@@ -192,7 +196,8 @@ class IdentifiersListPage(QWidget):
             "View": ":/assets/material-icons/view.svg",
             "Update": ":/assets/material-icons/cloud_sync.svg",
             "Delete": ":/assets/material-icons/delete.svg",
-            "Create Registry": ":/assets/material-icons/shield_lock.svg",
+            "Configure": ":/assets/material-icons/group.svg",
+            "Synchronize": ":/assets/material-icons/sync_lock.svg",
         }
         actions = ["View", "Delete"]
 
@@ -200,7 +205,8 @@ class IdentifiersListPage(QWidget):
         state = row_data.get('_state')
         has_local_hab = row_data.get('_has_local_hab', False)
         if state in ('live', 'live_behind') and has_local_hab:
-            actions.insert(1, "Create Registry")  # Insert after View
+            actions.insert(1, "Configure")  # Insert after View
+            actions.insert(2, "Synchronize")  # Insert after View
 
         if row_data.get('_is_local'):
             if row_data.get('_out_of_sync'):
@@ -259,8 +265,10 @@ class IdentifiersListPage(QWidget):
     def _on_row_action(self, row_data: dict[str, Any], action: str):
         if action == "View":
             self._view_identifier(row_data)
-        elif action == "Create Registry":
-            self._on_create_registry(row_data)
+        elif action == "Configure":
+            self._on_configure(row_data)
+        elif action == "Synchronize":
+            self._on_synchronize(row_data)
         elif action == "Update":
             self._on_update_identifier(row_data)
         elif action == "Delete":
@@ -290,7 +298,7 @@ class IdentifiersListPage(QWidget):
 
         dialog.show()
 
-    def _on_create_registry(self, row_data: dict[str, Any]):
+    def _on_configure(self, row_data: dict[str, Any]):
         """Launch Create Registry dialog for the selected identifier."""
         aid = row_data.get('_aid', '')
         identifier = self._identifiers_cache.get(aid)
@@ -298,13 +306,17 @@ class IdentifiersListPage(QWidget):
             logger.error(f"Identifier {aid} not in cache")
             return
 
-        dialog = CreateRegistryDialog(
-            app=self.app,
-            identifier=identifier,
-            on_refresh=self._refresh_table,
-            parent=self,
-        )
-        dialog.exec()
+        self.configure_multisig_clicked.emit(aid, identifier)
+
+    def _on_synchronize(self, row_data: dict[str, Any]):
+        """Launch Create Registry dialog for the selected identifier."""
+        aid = row_data.get('_aid', '')
+        identifier = self._identifiers_cache.get(aid)
+        if not identifier:
+            logger.error(f"Identifier {aid} not in cache")
+            return
+
+        self.synchronize_multisig_clicked.emit(aid, identifier)
 
     @qasync.asyncSlot(dict)
     async def _on_update_identifier(self, row_data: dict[str, Any]):

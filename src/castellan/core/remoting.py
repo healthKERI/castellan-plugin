@@ -58,7 +58,7 @@ async def essr_health_check(app: "LocksmithApplication") -> Dict[str, Any]:
     essr = _get_essr(app)
     if not essr:
         return {'success': False, 'error': 'No ESSR connection'}
-    return await _essr_health_roundtrip(essr)
+    return await _essr_health_roundtrip(essr)  # type: ignore
 
 
 async def essr_health_guard(essr, max_attempts: int = 5, retry_delay: float = 1.0) -> Dict[str, Any]:
@@ -1571,7 +1571,6 @@ async def create_multisig_registry(
         logger.exception(f"Error creating registry: {e}")
         return {'success': False, 'error': str(e)}
 
-
 def get_multisig_state(app, identifier) -> str:
     """Determine multisig state: 'pending', 'ready', or 'active'."""
     aid = identifier.get('aid', '')
@@ -1672,4 +1671,68 @@ async def load_multisig_member_kels(app, identifier):
 
         if member_aid not in app.vault.kvy.kevers:
             raise ValueError(f"Member {member_aid} KEL would not parse.")
+
+async def update_multisig_witnesses(
+        app: "LocksmithApplication",
+        multisig_id: str,
+        adds: list[dict],
+        witness_threshold: int,
+        cuts: Optional[list[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Update witnesses for a multisig identifier.
+
+    Args:
+        app: The Locksmith application instance
+        multisig_id: The multisig identifier AID
+        adds: List of witness dictionaries to add with keys: 'aid', 'alias', 'oobi'
+        witness_threshold: The witness signing threshold
+        cuts: Optional list of tuples (witness_aid, witness_alias, witness_oobi) to remove
+
+    Returns:
+        Dict with 'success' boolean and optional 'error' or 'data' keys
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    if cuts is None:
+        cuts = []
+
+    try:
+        # Build request body
+        body = {
+            'adds': adds,
+            'cuts': cuts,
+            'witness_threshold': witness_threshold,
+        }
+
+        print(json.dumps(body, indent=2))
+
+        # URL-encode the multisig_id
+        encoded_id = urllib.parse.quote(multisig_id, safe='')
+
+        response = await essr.request(
+            path=f"/multisig/identifiers/{encoded_id}/witnesses",
+            method="POST",
+            json=body,
+            timeout=60,
+        )
+
+        if response is not None and response.status_code in (200, 201):
+            return {'success': True, 'data': response.json() if response.content else {}}
+        else:
+            if response is not None:
+                logger.error(f"Update witnesses failed with status {response.status_code}: {response.text}")
+                try:
+                    error_msg = response.json().get('description', f"Status {response.status_code}")
+                except Exception:
+                    error_msg = f"Status {response.status_code}"
+            else:
+                error_msg = "No response"
+            return {'success': False, 'error': error_msg}
+
+    except Exception as e:
+        logger.exception(f"Error updating witnesses: {e}")
+        return {'success': False, 'error': str(e)}
 
