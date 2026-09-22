@@ -20,7 +20,7 @@ from locksmith.ui.toolkit.widgets.buttons import BackButton
 from locksmith.ui.vault.menu import MenuButton
 
 from .core.synchronizing import SynchronizationUI
-from .issuers.multisig.configure import ConfigureIssuerMultisigIdentifier
+from .issuers.multisig.add_witnesses import ConfigureIssuerMultisigIdentifier
 from .core import remoting
 from .db.basing import CastellanBaser
 
@@ -75,6 +75,7 @@ class CastellanPlugin(
         castellan_setup = CastellanAdminSetupPage(app, self.parent)
         multisig_init = InitiateMultisigPage(app, on_complete=self._on_multisig_init_complete, parent=None)
         syncronize_ui = SynchronizationUI(app=app)
+        add_issuer_witnesses = ConfigureIssuerMultisigIdentifier(app, parent=None)
 
         self._pages = {
             "castellan_schema": SchemaListPage(app, None),
@@ -85,7 +86,7 @@ class CastellanPlugin(
             "castellan_multisig_init": multisig_init,
             "castellan_setup": castellan_setup,
             "castellan_placeholder": CastellanPlaceholderPage("castellan", None),
-            "castellan_configure_multisig": ConfigureIssuerMultisigIdentifier(app, parent=None),
+            "castellan_configure_multisig": add_issuer_witnesses,
             "castellan_synchronization": syncronize_ui,
         }
 
@@ -93,6 +94,8 @@ class CastellanPlugin(
         issuer_list_page.synchronize_multisig_clicked.connect(self._on_synchronize_multisig)
         multisig_init.closed.connect(self._navigate_to_issuers)
         castellan_setup.setup_complete_clicked.connect(self._on_setup_complete_event)
+        add_issuer_witnesses.cancelled.connect(self._navigate_to_issuers)
+        add_issuer_witnesses.witness_created.connect(self._navigate_to_issuers)
 
     def _on_configure_multisig(self, aid, identifier) -> None:
         """Called when the issuer list page's "Configure Multisig" button is clicked."""

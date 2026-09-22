@@ -852,6 +852,8 @@ class InitiateMultisigPage(LocksmithFormPage):
 
         self._reset_button.setText("Cancel")
         self._reset_button.setEnabled(True)
+        self._continue_btn.setEnabled(True)
+
         self.closed.emit()
 
     def _launch_create_registry_doer(self, group_alias: str):

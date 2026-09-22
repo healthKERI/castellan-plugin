@@ -69,11 +69,11 @@ class IdentifiersListPage(QWidget):
             icon_path=":/assets/material-icons/group.svg",
             show_add_button=True,
             add_button_text="Add Issuer",
-            row_actions=["View", "Update", "Configure", "Delete"],
+            row_actions=["View", "Update", "Add Witnesses", "Delete"],
             row_action_icons={
                 "View": ":/assets/material-icons/view.svg",
                 "Update": ":/assets/material-icons/cloud_sync.svg",
-                "Configure": ":/assets/material-icons/group.svg",
+                "Add Witnesses": ":/assets/material-icons/witness2.svg",
                 "Synchronize": ":/assets/material-icons/sync_lock.svg",
                 "Delete": ":/assets/material-icons/delete.svg",
             },
@@ -97,6 +97,7 @@ class IdentifiersListPage(QWidget):
         identifier["_state"] = state
         aid = identifier.get('aid', '')
         alias = identifier.get('alias', '')
+        witnesses = identifier.get('witnesses', [])
         created_at = helping.fromIso8601(identifier.get('created_at', '')).strftime("%b %d, %Y %I:%M %p")
 
         hab = self.app.vault.hby.habs.get(aid)
@@ -176,6 +177,7 @@ class IdentifiersListPage(QWidget):
             '_has_local_hab': has_local_hab,
             '_is_local': is_local,
             '_out_of_sync': is_out_of_sync,
+            '_witnesses': witnesses,
         }
 
         if is_out_of_sync:
@@ -196,17 +198,19 @@ class IdentifiersListPage(QWidget):
             "View": ":/assets/material-icons/view.svg",
             "Update": ":/assets/material-icons/cloud_sync.svg",
             "Delete": ":/assets/material-icons/delete.svg",
-            "Configure": ":/assets/material-icons/group.svg",
+            "Add Witnesses": ":/assets/material-icons/witness2.svg",
+            "Change Witnesses": ":/assets/material-icons/witness2.svg",
             "Synchronize": ":/assets/material-icons/sync_lock.svg",
         }
         actions = ["View", "Delete"]
 
         # Add Create Registry for live identifiers that we control
         state = row_data.get('_state')
+        witnesses = row_data.get('_witnesses', [])
         has_local_hab = row_data.get('_has_local_hab', False)
         if state in ('live', 'live_behind') and has_local_hab:
-            actions.insert(1, "Configure")  # Insert after View
-            actions.insert(2, "Synchronize")  # Insert after View
+            actions.insert(1, "Change Witnesses" if witnesses else "Add Witnesses")  # Insert after View
+            # actions.insert(2, "Synchronize")  # Insert after View
 
         if row_data.get('_is_local'):
             if row_data.get('_out_of_sync'):
@@ -265,8 +269,10 @@ class IdentifiersListPage(QWidget):
     def _on_row_action(self, row_data: dict[str, Any], action: str):
         if action == "View":
             self._view_identifier(row_data)
-        elif action == "Configure":
-            self._on_configure(row_data)
+        elif action == "Add Witnesses":
+            self._on_add_witnesses(row_data)
+        elif action == "Change Witnesses":
+            self._on_add_witnesses(row_data)
         elif action == "Synchronize":
             self._on_synchronize(row_data)
         elif action == "Update":
@@ -298,7 +304,7 @@ class IdentifiersListPage(QWidget):
 
         dialog.show()
 
-    def _on_configure(self, row_data: dict[str, Any]):
+    def _on_add_witnesses(self, row_data: dict[str, Any]):
         """Launch Create Registry dialog for the selected identifier."""
         aid = row_data.get('_aid', '')
         identifier = self._identifiers_cache.get(aid)

@@ -18,6 +18,7 @@ from locksmith.ui.toolkit.widgets.extensible import ExtensibleSelectorWidget
 from locksmith.ui.toolkit.widgets.page import LocksmithFormPage
 from locksmith.ui.vault.healthKERI.core import remoting as base_remoting
 from locksmith.ui.vault.healthKERI.identifiers.update import SendKeystateUpdateDialog
+from locksmith.ui.vault.identifiers.authenticate import WitnessAuthenticationDialog
 
 from ...core import remoting
 
@@ -27,7 +28,7 @@ logger = help.ogler.getLogger(__name__)
 class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
     """Full-page form for creating a new witness."""
 
-    witness_created = Signal(object)  # Emits the created witness
+    witness_created = Signal()  # Emits the created witness
     cancelled = Signal()
     _identifiers_loaded = Signal(dict)  # Internal signal for async data
     _capacity_loaded = Signal(dict)  # Internal signal for capacity data
@@ -50,7 +51,6 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
         self._current_witnesses = None
 
         self._setup_content()
-
 
     def _setup_content(self):
         """Set up the page content within the superclass layout."""
@@ -416,15 +416,17 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
         # Disable button during creation
         self.add_witnesses_button.setEnabled(False)
         self.add_witnesses_button.setText("Adding...")
+        self.cancel_button.setText("Close")
+        self.cancel_button.setEnabled(False)
 
         try:
             # Get selected witnesses
             selected_witnesses = self.add_witness_selector.get_selected_items()
 
             # Format witness data for API
-            adds = []
+            added_witnesses = []
             for display_text, witness_data in selected_witnesses:
-                adds.append({
+                added_witnesses.append({
                     'aid': witness_data.get('id', ''),
                     'alias': witness_data.get('alias', ''),
                     'oobi': witness_data.get('oobi', ''),
@@ -433,36 +435,64 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
             # Get threshold
             threshold = int(self._threshold_edit.text().strip())
 
-            logger.info(f"Adding {len(adds)} witnesses to {self.aid} with threshold {threshold}")
+            hab = self.app.vault.hby.habs.get(self.aid)
+            if not hab:
+                self.show_error(f"Identifier {self.aid} is not controlled locally")
+                return
 
-            # Call API to add witnesses
-            result = await remoting.update_multisig_witnesses(
-                app=self.app,
-                multisig_id=multisig_id,
-                adds=adds,
-                witness_threshold=threshold,
-                cuts=[],  # No cuts for now
-            )
+            member_index = hab.smids.index(hab.mhab.pre)
+            tholder = hab.kever.tholder
 
-            if result.get('success'):
-                logger.info(f"Successfully added witnesses to {self.aid}")
+            # If our signature is enough to create the registry, do so, otherwise create without parsing
+            if tholder.satisfy([member_index]):
+                self._awaiting_auth = True
+                adds = [wit['aid'] for wit in added_witnesses]
 
-                # Clear errors on success
-                self.clear_error()
-                self.show_success(f"Successfully added {len(adds)} witness{'es' if len(adds) != 1 else ''} to identifier.")
+                await remoting.rotate_multisig_identifier(self.app, hab,
+                                                          isith=hab.kever.ntholder.sith, nsith=hab.kever.ntholder.sith,
+                                                          toad=threshold, cuts=[], adds=adds)
 
-                # Reset form
-                self.add_witness_selector.clear_selections()
-                self._threshold_edit.clear()
-
-
+                self.app.vault.signals.doer_event.connect(self._on_doer_event)
+                auth_dialog = WitnessAuthenticationDialog(
+                    app=self.app,
+                    hab=hab,
+                    witness_ids=adds,
+                    auth_only=False,
+                    parent=self,
+                )
+                auth_dialog.open()
             else:
-                error = result.get('error', 'Unknown error')
-                logger.error(f"Failed to add witnesses: {error}")
-                self.show_error(f"Failed to add witnesses: {error}")
 
-                self.add_witnesses_button.setEnabled(True)
-                self.add_witnesses_button.setText("Add Witnesses")
+                logger.info(f"Adding {len(added_witnesses)} witnesses to {self.aid} with threshold {threshold}")
+
+                # Call API to add witnesses
+                result = await remoting.update_multisig_witnesses(
+                    app=self.app,
+                    multisig_id=multisig_id,
+                    adds=added_witnesses,
+                    witness_threshold=threshold,
+                    cuts=[],  # No cuts for now
+                )
+
+                if result.get('success'):
+                    logger.info(f"Successfully added witnesses to {self.aid}")
+
+                    # Clear errors on success
+                    self.clear_error()
+                    self.show_success(f"Successfully added {len(added_witnesses)} witness{'es' if len(added_witnesses) != 1 else ''} to identifier.")
+
+                    # Reset form
+                    self.add_witness_selector.clear_selections()
+                    self._threshold_edit.clear()
+
+
+                else:
+                    error = result.get('error', 'Unknown error')
+                    logger.error(f"Failed to add witnesses: {error}")
+                    self.show_error(f"Failed to add witnesses: {error}")
+
+                    self.add_witnesses_button.setEnabled(True)
+                    self.add_witnesses_button.setText("Add Witnesses")
 
 
         except Exception as e:
@@ -471,6 +501,85 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
 
             self.add_witnesses_button.setEnabled(True)
             self.add_witnesses_button.setText("Add Witnesses")
+            self.cancel_button.setEnabled(True)
+            self.cancel_button.setText("Cancel")
+
+    @qasync.asyncSlot(str, str, dict)
+    async def _on_doer_event(self, doer_name: str, event_type: str, data: dict):
+        """
+        Handle auth codes entered from WitnessAuthenticationDialog.
+
+        Args:
+            data: Dictionary containing 'codes' key with list of "witness_id:passcode" strings
+        """
+        if doer_name != "AuthenticateWitnessesDoer":
+            return
+
+        if data['pre'] != self.aid:
+            return
+
+        if event_type == "witness_authentication_failed":
+            error = data['error']
+            logger.error(f"Failed to add witnesses: {error}")
+            self.show_error(f"Failed to add witnesses: {error}")
+
+            self.add_witnesses_button.setEnabled(True)
+            self.add_witnesses_button.setText("Add Witnesses")
+            return
+
+        # Assumes event_type is "witness_authentication_success"
+
+        multisig_id = self.identifier.get('id')
+        self.app.vault.signals.doer_event.disconnect(self._on_doer_event)
+
+        if not self._awaiting_auth:
+            return
+
+        self._awaiting_auth = False
+
+        selected_witnesses = self.add_witness_selector.get_selected_items()
+
+        # Format witness data for API
+        adds = []
+        for display_text, witness_data in selected_witnesses:
+            adds.append({
+                'aid': witness_data.get('id', ''),
+                'alias': witness_data.get('alias', ''),
+                'oobi': witness_data.get('oobi', ''),
+            })
+
+        rot = self.hab.db.cloneEvtMsg(self.hab.pre, 0, self.hab.kever.serder.said)
+        # Call API to add witnesses
+        result = await remoting.complete_multisig_witnesses(
+            app=self.app,
+            multisig_id=multisig_id,
+            rot=rot,
+            data=adds,
+        )
+
+        if result.get('success'):
+            logger.info(f"Successfully added witnesses to {self.aid}")
+
+            # Clear errors on success
+            self.clear_error()
+            self.show_success(f"Successfully added {len(adds)} witness{'es' if len(adds) != 1 else ''} to identifier.")
+
+            # Reset form
+            self.add_witness_selector.clear_selections()
+            self._threshold_edit.clear()
+
+
+        else:
+            error = result.get('error', 'Unknown error')
+            logger.error(f"Failed to add witnesses: {error}")
+            self.show_error(f"Failed to add witnesses: {error}")
+
+            self.add_witnesses_button.setEnabled(True)
+            self.add_witnesses_button.setText("Add Witnesses")
+
+        self.cancel_button.setText("Done")
+        self.cancel_button.setEnabled(True)
+
 
     def _display_oobi_panels(self, witnesses: list, controller_alias: str, controller_aid: str):
         """Display OOBI panels for the created witnesses."""
@@ -676,12 +785,12 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
 
     def _on_done_clicked(self):
         """Handle Done button click - navigate back to witness list."""
-        logger.info("Done button clicked - returning to witness list")
+        logger.info("Done button clicked - returning to Identifier list")
         # If witnesses were created, emit witness_created signal to trigger list refresh
         # Otherwise emit cancelled signal
         if self.created_witnesses:
             # Emit with the list of created witnesses
-            self.witness_created.emit(self.created_witnesses)
+            self.witness_created.emit()
         else:
             self.cancelled.emit()
 
@@ -722,6 +831,8 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
         self.add_witnesses_button.setText("Add Witnesses")
         self.add_witnesses_button.setFixedWidth(175)
         self.add_witnesses_button.show()
+
+        self.cancel_button.setText("Cancel")
         self.cancel_button.show()
 
         # Hide and clear OOBI section
