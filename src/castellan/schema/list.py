@@ -4,7 +4,6 @@ castellan.schema.list module
 
 Schema list page — shows schemas stored on the Castellan server.
 """
-import json
 from typing import Any, TYPE_CHECKING
 
 import qasync
@@ -12,6 +11,7 @@ from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from keri import help
 from keri.help import helping
+from keri.core.scheming import Schemer
 from locksmith.ui import colors
 from locksmith.ui.toolkit.tables import PaginatedTableWidget
 
@@ -58,6 +58,7 @@ class SchemaListPage(QWidget):
                 "View": ":/assets/material-icons/view.svg",
                 "Delete": ":/assets/material-icons/delete.svg",
             },
+            row_actions_callback=self._get_row_actions,
             items_per_page=10,
             show_search=True,
             column_sort_mapping={
@@ -85,15 +86,45 @@ class SchemaListPage(QWidget):
         created_at_date = helping.fromIso8601(data.get('created_at', ''))
         created_at = created_at_date.strftime("%b %d, %Y %I:%M %p")
 
+        # Check if schema is loaded locally
+        is_loaded = self.app.vault.hby.db.schema.get(keys=(said,)) is not None
+
         row_data = {
             'Title': title,
             'Version': version,
             'Created Date': created_at,
             '_said': said,
+            '_is_loaded': is_loaded,
+            '_schema': schema,  # Store full schema for loading
         }
 
         self._schema_cache[said] = schema
         return row_data
+
+    @staticmethod
+    def _get_row_actions(row_data: dict[str, Any]) -> tuple[list[str], dict[str, str]]:
+        """
+        Get row actions based on whether the schema is loaded locally.
+
+        Args:
+            row_data: Row data dictionary
+
+        Returns:
+            Tuple of (actions list, icons dict)
+        """
+        all_icons = {
+            "View": ":/assets/material-icons/view.svg",
+            "Delete": ":/assets/material-icons/delete.svg",
+            "Load Schema": ":/assets/material-icons/download.svg",
+        }
+
+        actions = ["View", "Delete"]
+
+        # Add "Load Schema" action if schema is not loaded locally
+        if not row_data.get('_is_loaded', True):
+            actions.insert(1, "Load Schema")  # Insert after View
+
+        return actions, {a: all_icons[a] for a in actions}
 
     @qasync.asyncSlot(dict)
     async def _on_load_requested(self, params: dict):
@@ -146,6 +177,8 @@ class SchemaListPage(QWidget):
         said = row_data.get('_said', '')
         if action == "View":
             self._view_schema(said)
+        elif action == "Load Schema":
+            self._on_load_schema(row_data)
         elif action == "Delete":
             self._on_delete_schema(row_data)
 
@@ -155,9 +188,36 @@ class SchemaListPage(QWidget):
             logger.error(f"Schema {said} not in cache")
             return
 
-        logger.info(f"Opening view dialog for schema: {schema}")
         dialog = ViewSchemaDialog(schema=schema, parent=self)
         dialog.show()
+
+    def _on_load_schema(self, row_data: dict[str, Any]) -> None:
+        """
+        Handle Load Schema action - loads schema into local database.
+
+        Args:
+            row_data: Row data containing schema information
+        """
+        schema = row_data.get('_schema')
+        if not schema:
+            logger.error("Cannot load: no schema data found in row")
+            return
+
+        try:
+            # Create Schemer object from schema data
+            schemer = Schemer(sed=schema)
+
+            # Save to local database
+            self.app.vault.hby.db.schema.pin(keys=(schemer.said,), val=schemer)
+
+            logger.info(f"Schema {schemer.said} loaded successfully into local database")
+
+            # Refresh the table to update the row actions
+            self._refresh_table()
+
+        except Exception as e:
+            logger.exception(f"Error loading schema: {e}")
+            # Could show error to user if there's a notification mechanism
 
     def _on_delete_schema(self, row_data: dict[str, Any]) -> None:
         """Handle Delete schema action."""

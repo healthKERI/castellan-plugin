@@ -433,7 +433,7 @@ class InitiateMultisigPage(LocksmithFormPage):
                     continue
 
                 # Add to dropdown
-                display_name = f"{username} — {aid[:12]}..."
+                display_name = f"{username} — {aid}"
                 self._account_dropdown.addItem(display_name, userData=account)
 
         except Exception as e:

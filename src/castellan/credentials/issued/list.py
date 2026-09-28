@@ -70,7 +70,7 @@ class IssuedCredentialsListPage(QWidget):
             title="Issued Credentials",
             icon_path=":/assets/material-icons/out-badge.svg",
             show_add_button=True,
-            add_button_text="Upload Credential",
+            add_button_text="Upload/Issue Credential",
             row_actions=["View", "Edit", "Revoke", "Update", "Delete"],
             row_action_icons={
                 "View": ":/assets/material-icons/view.svg",

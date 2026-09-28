@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING
 
 import qasync
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 from keri import help
+from locksmith.ui import colors
 
 from locksmith.ui.toolkit.widgets import (
     LocksmithDialog, LocksmithButton, LocksmithInvertedButton,
@@ -20,11 +21,9 @@ from locksmith.ui.toolkit.widgets import (
     EditableAddressLabelValue, EditableDateLabelValue, EditablePhoneLabelValue
 )
 from locksmith.ui.toolkit.widgets.fields import FloatingLabelComboBox
-from ...core import remoting
 
-if TYPE_CHECKING:
-    from locksmith.core.apping import LocksmithApplication
-    from locksmith.ui.vault.page import VaultPage
+from .issue import IssueCredentialDialog
+from ...core import remoting
 
 logger = help.ogler.getLogger(__name__)
 
@@ -34,9 +33,9 @@ class UploadIssuedCredentialsDialog(LocksmithDialog):
 
     def __init__(
         self,
-        app: "LocksmithApplication",
+        app,
         on_refresh: Callable[[], None] | None = None,
-        parent: "VaultPage | None" = None,
+        parent = None,
     ):
         self.app = app
         self.on_refresh = on_refresh
@@ -59,6 +58,9 @@ class UploadIssuedCredentialsDialog(LocksmithDialog):
         self.credential_selector.setFixedWidth(450)
         self.credential_selector.currentIndexChanged.connect(self._on_credential_selected)
         self._content_layout.addWidget(self.credential_selector)
+
+        self.issue_link_section = self._create_issue_link()
+        self._content_layout.addWidget(self.issue_link_section)
 
         # Add field type dropdown (initially hidden, shown when credential is selected)
         # Right-aligned, positioned directly below the credential selector
@@ -121,11 +123,56 @@ class UploadIssuedCredentialsDialog(LocksmithDialog):
         self.upload_btn.clicked.connect(self._on_upload)
 
         self.setFixedWidth(530)
-        self._initial_height = 350  # Base height without field dropdown
+        self._initial_height = 385  # Base height without field dropdown
         self._expanded_height = 450  # Height with field dropdown visible
 
         # Populate dropdown async
         self._populate_dropdown()
+
+    def _create_issue_link(self):
+
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 10, 0, 0)
+        content_layout.setSpacing(12)
+
+        desc = QLabel(
+            "or..."
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"font-size: 15px; color: {colors.TEXT_SUBTLE};")
+        content_layout.addWidget(desc)
+        content_layout.addSpacing(8)
+
+        self.multisig_link = QPushButton("Issue a credential with a Castellan Multi-signature Issuer")
+        self.multisig_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.multisig_link.setFlat(True)
+        self.multisig_link.setStyleSheet(f"""
+            QPushButton {{
+                border: none;
+                background: transparent;
+                color: {colors.BLUE_ACCENT};
+                text-decoration: underline;
+                font-size: 13px;
+                text-align: left;
+                padding: 0;
+            }}
+            QPushButton:hover {{
+                color: {colors.BLUE_SELECTION};
+            }}
+        """)
+        self.multisig_link.clicked.connect(self._on_issue_link_clicked)
+        content_layout.addWidget(self.multisig_link)
+
+        content_layout.addSpacing(25)
+
+        return content_widget
+
+    def _on_issue_link_clicked(self):
+        """Handle click on the issue link."""
+        logger.info("Upload Issued credential clicked")
+        dialog = IssueCredentialDialog(app=self.app, parent=self)
+        dialog.open()
 
     def _on_credential_selected(self, index: int):
         """Handle credential selection from the dropdown."""
@@ -145,6 +192,7 @@ class UploadIssuedCredentialsDialog(LocksmithDialog):
         else:
             # Credential selected - show add field dropdown
             self.add_field_dropdown.setVisible(True)
+            self.issue_link_section.setVisible(False)
             # Resize dialog to accommodate field dropdown
             self.setFixedHeight(self._expanded_height)
             self.center_on_parent()
