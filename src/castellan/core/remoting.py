@@ -12,26 +12,26 @@ import asyncio
 import base64
 import json
 import urllib.parse
-from typing import TYPE_CHECKING, Dict, Any, Optional
+from typing import Dict, Any, Optional
 
-from keri.core import parsing
+from keri.app import signing
+from keri.core import parsing, serdering, coring
 from keri.core.scheming import Schemer
 from keri.kering import Ilks
+from keri.vc import protocoling
 from locksmith.core.credentialing import outputCred
-
-if TYPE_CHECKING:
-    from locksmith.core.apping import LocksmithApplication
 
 from keri import help
 
 logger = help.ogler.getLogger(__name__)
 
 
-def _get_essr(app: "LocksmithApplication"):
+def _get_essr(app):
     """Get the ESSR client from plugin state."""
     if not app.vault:
         return None
     return app.vault.plugin_state.get("castellan", {}).get("essr")
+
 
 # ---------------------------------------------------------------------------
 # ESSR Health
@@ -54,7 +54,7 @@ async def _essr_health_roundtrip(essr) -> Dict[str, Any]:
         return {'success': False, 'error': f'ESSR request failed: {str(e)}'}
 
 
-async def essr_health_check(app: "LocksmithApplication") -> Dict[str, Any]:
+async def essr_health_check(app) -> Dict[str, Any]:
     essr = _get_essr(app)
     if not essr:
         return {'success': False, 'error': 'No ESSR connection'}
@@ -83,16 +83,17 @@ async def essr_health_guard(essr, max_attempts: int = 5, retry_delay: float = 1.
 
     return result
 
+
 # ---------------------------------------------------------------------------
 # Issued credentials
 # ---------------------------------------------------------------------------
 
 async def fetch_issued_credentials(
-    app: "LocksmithApplication",
-    page: int = 0,
-    page_size: int = 10,
-    filter_term: Optional[str] = None,
-    order: Optional[list] = None,
+        app,
+        page: int = 0,
+        page_size: int = 10,
+        filter_term: Optional[str] = None,
+        order: Optional[list] = None,
 ) -> Dict[str, Any]:
     """Fetch issued credentials from the Castellan server (paginated)."""
     essr = _get_essr(app)
@@ -124,7 +125,7 @@ async def fetch_issued_credentials(
         return {'success': False, 'error': str(e)}
 
 
-async def fetch_all_castellan_issued_saids(app: "LocksmithApplication") -> set:
+async def fetch_all_castellan_issued_saids(app) -> set:
     """Fetch all issued credential SAIDs currently stored on the Castellan server."""
     essr = _get_essr(app)
     if not essr:
@@ -142,12 +143,12 @@ async def fetch_all_castellan_issued_saids(app: "LocksmithApplication") -> set:
 
 
 async def upload_issued_credential(
-    app: "LocksmithApplication",
-    credential_said: str,
-    schema: dict,
-    issuer: str,
-    recipient: str,
-    dynamic_field_data: list | None = None,
+        app,
+        credential_said: str,
+        schema: dict,
+        issuer: str,
+        recipient: str,
+        dynamic_field_data: list | None = None,
 ) -> Dict[str, Any]:
     """
     Upload an issued credential to the Castellan server.
@@ -221,9 +222,9 @@ async def upload_issued_credential(
 
 
 async def update_issued_credential_metadata(
-    app: "LocksmithApplication",
-    credential_said: str,
-    dynamic_field_data: list | None = None,
+        app,
+        credential_said: str,
+        dynamic_field_data: list | None = None,
 ) -> Dict[str, Any]:
     """
     Update the metadata (dynamic fields) of an issued credential on the Castellan server.
@@ -271,9 +272,9 @@ async def update_issued_credential_metadata(
 
 
 async def update_issued_credential_status(
-    app: "LocksmithApplication",
-    credential_said: str,
-    status: str,
+        app,
+        credential_said: str,
+        status: str,
 ) -> Dict[str, Any]:
     """
     Push a local status change (e.g. a TEL revocation) to the Castellan server
@@ -320,8 +321,8 @@ async def update_issued_credential_status(
 
 
 async def delete_issued_credential(
-    app: "LocksmithApplication",
-    said: str,
+        app,
+        said: str,
 ) -> Dict[str, Any]:
     """Delete an issued credential from the Castellan server."""
     essr = _get_essr(app)
@@ -351,11 +352,11 @@ async def delete_issued_credential(
 # ---------------------------------------------------------------------------
 
 async def fetch_schemas(
-    app: "LocksmithApplication",
-    page: int = 0,
-    page_size: int = 10,
-    filter_term: Optional[str] = None,
-    order: Optional[list] = None,
+        app,
+        page: int = 0,
+        page_size: int = 10,
+        filter_term: Optional[str] = None,
+        order: Optional[list] = None,
 ) -> Dict[str, Any]:
     """Fetch schemas from the Castellan server (paginated)."""
     essr = _get_essr(app)
@@ -387,7 +388,7 @@ async def fetch_schemas(
         return {'success': False, 'error': str(e)}
 
 
-async def fetch_all_castellan_schema_saids(app: "LocksmithApplication") -> set:
+async def fetch_all_castellan_schema_saids(app) -> set:
     """Fetch all schema SAIDs currently stored on the Castellan server."""
     essr = _get_essr(app)
     if not essr:
@@ -405,8 +406,8 @@ async def fetch_all_castellan_schema_saids(app: "LocksmithApplication") -> set:
 
 
 async def fetch_schema_fields(
-    app: "LocksmithApplication",
-    schema_said: str,
+        app,
+        schema_said: str,
 ) -> Dict[str, Any]:
     """
     Fetch remembered fields for a schema from the Castellan server.
@@ -453,9 +454,9 @@ async def fetch_schema_fields(
 
 
 async def upload_schema(
-    app: "LocksmithApplication",
-    schema_said: str,
-    sad: dict,
+        app,
+        schema_said: str,
+        sad: dict,
 ) -> Dict[str, Any]:
     """Upload a schema to the Castellan server."""
     essr = _get_essr(app)
@@ -473,7 +474,8 @@ async def upload_schema(
             return {'success': False, 'error': f'No schema data for {schema_said}'}
 
         files = {
-            'schema': ('schema.json', bytes(schema_bytes), 'application/json')
+            'data': ('data', json.dumps(sad), 'application/json'),
+            'schema.cesr': ('schema.bin', bytes(schema_bytes), 'application/octet-stream')
         }
 
         response = await essr.request(
@@ -502,8 +504,8 @@ async def upload_schema(
 
 
 async def delete_schema(
-    app: "LocksmithApplication",
-    said: str,
+        app,
+        said: str,
 ) -> Dict[str, Any]:
     """Delete a schema from the Castellan server."""
     essr = _get_essr(app)
@@ -533,11 +535,11 @@ async def delete_schema(
 # ---------------------------------------------------------------------------
 
 async def fetch_received_credentials(
-    app: "LocksmithApplication",
-    page: int = 0,
-    page_size: int = 10,
-    filter_term: Optional[str] = None,
-    order: Optional[list] = None,
+        app,
+        page: int = 0,
+        page_size: int = 10,
+        filter_term: Optional[str] = None,
+        order: Optional[list] = None,
 ) -> Dict[str, Any]:
     """Fetch received credentials from the Castellan server (paginated)."""
     essr = _get_essr(app)
@@ -569,7 +571,7 @@ async def fetch_received_credentials(
         return {'success': False, 'error': str(e)}
 
 
-async def fetch_all_castellan_received_saids(app: "LocksmithApplication") -> set:
+async def fetch_all_castellan_received_saids(app) -> set:
     """Fetch all received credential SAIDs currently stored on the Castellan server."""
     essr = _get_essr(app)
     if not essr:
@@ -587,12 +589,12 @@ async def fetch_all_castellan_received_saids(app: "LocksmithApplication") -> set
 
 
 async def upload_received_credential(
-    app: "LocksmithApplication",
-    credential_said: str,
-    schema: dict,
-    issuer: str,
-    holder: str,
-    dynamic_field_data: list | None = None,
+        app,
+        credential_said: str,
+        schema: dict,
+        issuer: str,
+        holder: str,
+        dynamic_field_data: list | None = None,
 ) -> Dict[str, Any]:
     """Upload a received credential to the Castellan server."""
     essr = _get_essr(app)
@@ -652,8 +654,8 @@ async def upload_received_credential(
 
 
 async def delete_received_credential(
-    app: "LocksmithApplication",
-    said: str,
+        app,
+        said: str,
 ) -> Dict[str, Any]:
     """Delete a received credential from the Castellan server."""
     essr = _get_essr(app)
@@ -679,9 +681,9 @@ async def delete_received_credential(
 
 
 async def update_received_credential_metadata(
-    app: "LocksmithApplication",
-    credential_said: str,
-    dynamic_field_data: list | None = None,
+        app,
+        credential_said: str,
+        dynamic_field_data: list | None = None,
 ) -> Dict[str, Any]:
     """
     Update the metadata (dynamic fields) of a received credential on the Castellan server.
@@ -733,8 +735,8 @@ async def update_received_credential_metadata(
 # ---------------------------------------------------------------------------
 
 async def fetch_identifier_keystate(
-    app: "LocksmithApplication",
-    identifier_prefix: str,
+        app,
+        identifier_prefix: str,
 ) -> Dict[str, Any]:
     """
     Fetch identifier key state from the Castellan server.
@@ -779,11 +781,11 @@ async def fetch_identifier_keystate(
 
 
 async def upload_identifier(
-    app: "LocksmithApplication",
-    aid: str,
-    alias: str,
-    kel_bytes: bytes,
-    oobi: str = "",
+        app,
+        aid: str,
+        alias: str,
+        kel_bytes: bytes,
+        oobi: str = "",
 ) -> Dict[str, Any]:
     """
     Upload a peer-discovery identifier to castellan POST /identifiers.
@@ -824,7 +826,7 @@ async def upload_identifier(
         return {'success': False, 'error': str(e)}
 
 
-async def fetch_identifier_kel(app: "LocksmithApplication", aid: str) -> Dict[str, Any]:
+async def fetch_identifier_kel(app, aid: str) -> Dict[str, Any]:
     """
     GET /identifiers/{aid}/kel — fetch the CESR KEL stream for a peer identifier.
 
@@ -858,12 +860,12 @@ async def fetch_identifier_kel(app: "LocksmithApplication", aid: str) -> Dict[st
 
 
 async def fetch_identifiers(
-    app: "LocksmithApplication",
-    page: int = 0,
-    page_size: int = 10,
-    filter_term: Optional[str] = None,
-    order: Optional[list] = None,
-    include_key_state: bool = False,
+        app,
+        page: int = 0,
+        page_size: int = 10,
+        filter_term: Optional[str] = None,
+        order: Optional[list] = None,
+        include_key_state: bool = False,
 ) -> Dict[str, Any]:
     """
     Fetch peer-discovery identifiers from the Castellan server (paginated).
@@ -905,7 +907,7 @@ async def fetch_identifiers(
         return {'success': False, 'error': str(e)}
 
 
-async def delete_identifier(app: "LocksmithApplication", aid: str) -> Dict[str, Any]:
+async def delete_identifier(app, aid: str) -> Dict[str, Any]:
     """Delete a peer-discovery identifier from the Castellan server."""
     essr = _get_essr(app)
     if not essr:
@@ -933,12 +935,12 @@ async def delete_identifier(app: "LocksmithApplication", aid: str) -> Dict[str, 
 # ---------------------------------------------------------------------------
 
 async def post_message(
-    app: "LocksmithApplication",
-    recipient_aid: str,
-    topic: str,
-    raw: bytes,
-    sender_aid: Optional[str] = None,
-    multisig_alias: str = "",
+        app,
+        recipient_aid: str,
+        topic: str,
+        raw: bytes,
+        sender_aid: Optional[str] = None,
+        multisig_alias: str = "",
 ) -> Dict[str, Any]:
     """
     POST a CESR-encoded message to castellan /messages.
@@ -984,12 +986,12 @@ async def post_message(
 
 
 async def fetch_messages(
-    app: "LocksmithApplication",
-    aid: Optional[str] = None,
-    topic: Optional[str] = None,
-    unread_only: bool = True,
-    page: int = 0,
-    page_size: int = 50,
+        app,
+        aid: Optional[str] = None,
+        topic: Optional[str] = None,
+        unread_only: bool = True,
+        page: int = 0,
+        page_size: int = 50,
 ) -> Dict[str, Any]:
     """
     GET messages from castellan /messages for the given AID.
@@ -1029,8 +1031,8 @@ async def fetch_messages(
 
 
 async def mark_message_read(
-    app: "LocksmithApplication",
-    message_id: str,
+        app,
+        message_id: str,
 ) -> Dict[str, Any]:
     """Mark a castellan mailbox message as read."""
     essr = _get_essr(app)
@@ -1056,7 +1058,7 @@ async def mark_message_read(
 
 
 async def upload_account_identifier(
-        app: "LocksmithApplication",
+        app,
         aid: str,
         alias: str
 ) -> Dict[str, Any]:
@@ -1134,7 +1136,7 @@ async def upload_account_identifier(
 # ---------------------------------------------------------------------------
 # Accounts
 # ---------------------------------------------------------------------------
-async def get_account(app: "LocksmithApplication", account_id: str) -> Dict[str, Any]:
+async def get_account(app, account_id: str) -> Dict[str, Any]:
     """ Load single account by account_id """
     try:
         essr = _get_essr(app)
@@ -1156,11 +1158,11 @@ async def get_account(app: "LocksmithApplication", account_id: str) -> Dict[str,
 
 
 async def fetch_accounts(
-    app: "LocksmithApplication",
-    page: int = 0,
-    page_size: int = 10,
-    filter_term: Optional[str] = None,
-    order: Optional[list] = None,
+        app,
+        page: int = 0,
+        page_size: int = 10,
+        filter_term: Optional[str] = None,
+        order: Optional[list] = None,
 ) -> Dict[str, Any]:
     """Fetch user accounts from the Castellan server (paginated)."""
     essr = _get_essr(app)
@@ -1193,13 +1195,13 @@ async def fetch_accounts(
 
 
 async def create_account(
-    app: "LocksmithApplication",
-    name: str,
-    email: str,
-    identifier_aid: str,
-    role: str,
-    first_name: Optional[str] = "",
-    last_name: Optional[str] = ""
+        app,
+        name: str,
+        email: str,
+        identifier_aid: str,
+        role: str,
+        first_name: Optional[str] = "",
+        last_name: Optional[str] = ""
 ) -> Dict[str, Any]:
     """Create a new user account on the Castellan server."""
     essr = _get_essr(app)
@@ -1261,9 +1263,10 @@ async def create_account(
         logger.error(f"Error creating account: {e}")
         return {'success': False, 'error': str(e)}
 
+
 async def delete_account(
-    app: "LocksmithApplication",
-    account_id: str,
+        app,
+        account_id: str,
 ) -> Dict[str, Any]:
     """Delete a user account from the Castellan server."""
     essr = _get_essr(app)
@@ -1287,8 +1290,9 @@ async def delete_account(
         logger.error(f"Error deleting account: {e}")
         return {'success': False, 'error': str(e)}
 
+
 async def update_account(
-        app: "LocksmithApplication",
+        app,
         account_id: str,
         username: Optional[str] = None,
         email: Optional[str] = None,
@@ -1347,9 +1351,56 @@ async def update_account(
 # ---------------------------------------------------------------------------
 # Multisig Identifiers
 # ---------------------------------------------------------------------------
+async def fetch_multisig_identifiers(
+        app,
+        page: int = 0,
+        page_size: int = 10,
+        filter_term: Optional[str] = None,
+        order: Optional[list] = None,
+        include_key_state: bool = False,
+) -> Dict[str, Any]:
+    """
+    Fetch peer-discovery identifiers from the Castellan server (paginated).
+
+    `include_key_state` asks the server to embed each row's remote key state
+    in the response (so callers rendering a "Seq No" column don't need a
+    separate fetch_identifier_keystate round-trip per row). Leave it False
+    for large/unpaginated fetches (e.g. peer-discovery polling), since the
+    server computes it per identifier and it isn't needed there.
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        params = [f"page={page}", f"page_size={page_size}"]
+        if filter_term:
+            params.append(f"filter={urllib.parse.quote(filter_term)}")
+        if order:
+            for o in order:
+                params.append(f"order={urllib.parse.quote(o)}")
+        if include_key_state:
+            params.append("include_key_state=true")
+
+        path = f"/multisig/identifiers?{'&'.join(params)}"
+        response = await essr.request(path=path, method="GET")
+
+        if response is not None and response.status_code == 200:
+            data = response.json()
+            data['success'] = True
+            return data
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}",
+            }
+    except Exception as e:
+        logger.error(f"Error fetching identifiers: {e}")
+        return {'success': False, 'error': str(e)}
+
 
 async def create_multisig_identifier(
-        app: "LocksmithApplication",
+        app,
         kel: bytes,
         multisig_data: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -1405,7 +1456,7 @@ async def create_multisig_identifier(
 
 
 async def join_multisig_identifier(
-        app: "LocksmithApplication",
+        app,
         multisig_id: str,
         kel: bytes,
         multisig_data: Dict[str, Any]
@@ -1459,7 +1510,7 @@ async def join_multisig_identifier(
 
 
 async def add_multisig_signature_identifier(
-        app: "LocksmithApplication",
+        app,
         multisig_id: str,
         icp: bytes,
         multisig_data: Dict[str, Any]
@@ -1513,13 +1564,13 @@ async def add_multisig_signature_identifier(
 
 
 async def create_multisig_registry(
-    app: "LocksmithApplication",
-    multisig_id: str,
-    vcp_bytes: bytes,
-    ixn_bytes: bytes,
-    mailbox_bytes: bytes,
-    registrar_bytes: bytes,
-    registry_name: str,
+        app,
+        multisig_id: str,
+        vcp_bytes: bytes,
+        ixn_bytes: bytes,
+        mailbox_bytes: bytes,
+        registrar_bytes: bytes,
+        registry_name: str,
 ) -> Dict[str, Any]:
     """
     Create a credential registry for a multisig identifier.
@@ -1577,6 +1628,127 @@ async def create_multisig_registry(
         logger.exception(f"Error creating registry: {e}")
         return {'success': False, 'error': str(e)}
 
+
+async def issue_multisig_credential(
+        app,
+        multisig_id: str,
+        credential_bytes: bytes,
+        ixn_bytes: bytes,
+        iss_bytes: bytes,
+        grant_bytes: bytes
+) -> Dict[str, Any]:
+    """
+    Create a credential registry for a multisig identifier.
+
+    Args:
+        app: The Locksmith application instance
+        multisig_id: The multisig identifier AID (URL-encoded)
+        credential_bytes: The credential bytes
+        ixn_bytes: The IXN (interaction) event bytes that anchor the credential
+        iss_bytes: The ISS (issuance) TEL event bytes
+        grant_bytes: The grant EXN event bytes
+
+    Returns:
+        Dict with 'success' boolean and optional 'error' or 'data' keys
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        # Build multipart form with VCP, IXN, and body
+        files = {
+            'iss': ('iss.cesr', iss_bytes, 'application/octet-stream'),
+            'ixn': ('ixn.cesr', ixn_bytes, 'application/octet-stream'),
+            'credential': ('credential.cesr', credential_bytes, 'application/octet-stream'),
+            'grant': ('grant.cesr', grant_bytes, 'application/octet-stream'),
+        }
+
+        # URL-encode the multisig_id
+        encoded_id = urllib.parse.quote(multisig_id, safe='')
+
+        response = await essr.request(
+            path=f"/multisig/identifiers/{encoded_id}/credentials",
+            method="POST",
+            files=files,
+            timeout=60,
+        )
+
+        if response is not None and response.status_code in (200, 201):
+            return {'success': True, 'data': response.json() if response.content else {}}
+        else:
+            if response is not None:
+                logger.error(f"Issue credential failed with status {response.status_code}: {response.text}")
+                try:
+                    error_msg = response.json().get('description', f"Status {response.status_code}")
+                except Exception:
+                    error_msg = f"Status {response.status_code}"
+            else:
+                error_msg = "No response"
+            return {'success': False, 'error': error_msg}
+
+    except Exception as e:
+        logger.exception(f"Error creating registry: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def complete_multisig_credential(
+        app,
+        body: dict,
+        multisig_id: str,
+        ixn_bytes: bytes,
+) -> Dict[str, Any]:
+    """
+    Create a credential registry for a multisig identifier.
+
+    Args:
+        app: The Locksmith application instance
+        body: The body of the request
+        multisig_id: The multisig identifier AID (URL-encoded)
+        ixn_bytes: The IXN (interaction) event bytes that anchor the credential
+
+    Returns:
+        Dict with 'success' boolean and optional 'error' or 'data' keys
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        # Build multipart form with ISS, IXN, and credential
+        files = {
+            'body': ('body.json', json.dumps(body), 'application/json'),
+            'ixn': ('ixn.cesr', ixn_bytes, 'application/octet-stream'),
+        }
+
+        # URL-encode the multisig_id
+        encoded_id = urllib.parse.quote(multisig_id, safe='')
+
+        response = await essr.request(
+            path=f"/multisig/identifiers/{encoded_id}/credentials",
+            method="PUT",
+            files=files,
+            timeout=60,
+        )
+
+        if response is not None and response.status_code in (200, 201):
+            return {'success': True, 'data': response.json() if response.content else {}}
+        else:
+            if response is not None:
+                logger.error(f"Issue credential failed with status {response.status_code}: {response.text}")
+                try:
+                    error_msg = response.json().get('description', f"Status {response.status_code}")
+                except Exception:
+                    error_msg = f"Status {response.status_code}"
+            else:
+                error_msg = "No response"
+            return {'success': False, 'error': error_msg}
+
+    except Exception as e:
+        logger.exception(f"Error creating registry: {e}")
+        return {'success': False, 'error': str(e)}
+
+
 def get_multisig_state(app, identifier) -> str:
     """Determine multisig state: 'pending', 'ready', or 'active'."""
     aid = identifier.get('aid', '')
@@ -1619,6 +1791,7 @@ def get_multisig_state(app, identifier) -> str:
     else:
         return "single"
 
+
 def get_my_member(app, identifier) -> dict | None:
     """Find current user's member object in the multisig, if present."""
     my_account_aid = get_current_account_aid(app)
@@ -1632,6 +1805,7 @@ def get_my_member(app, identifier) -> dict | None:
 
     return None
 
+
 def get_current_account_aid(app) -> str:
     """Get the current user's Castellan account AID."""
     if not app or not app.vault:
@@ -1640,19 +1814,23 @@ def get_current_account_aid(app) -> str:
     account = app.vault.plugin_state.get("castellan", {}).get("account", {})
     return account.get("aid", "")
 
+
 def is_member(app, identifier) -> bool:
     """Check if current user is a member of this multisig."""
     return get_my_member(app, identifier) is not None
+
 
 def has_approved(app, identifier) -> bool:
     """Check if current user has joined the multisig."""
     my_member = get_my_member(app, identifier)
     return my_member is not None and my_member.get('member_aid') is not None
 
+
 def has_joined(app, identifier) -> bool:
     """Check if current user has joined the multisig."""
     my_member = get_my_member(app, identifier)
     return has_approved(app, identifier) and my_member.get('public_key', None)
+
 
 async def load_multisig_member_kels(app, identifier):
     """ Loop through all members of a multisig identifier and load the KELs of members who are not us."""
@@ -1678,8 +1856,9 @@ async def load_multisig_member_kels(app, identifier):
         if member_aid not in app.vault.kvy.kevers:
             raise ValueError(f"Member {member_aid} KEL would not parse.")
 
+
 async def update_multisig_witnesses(
-        app: "LocksmithApplication",
+        app,
         multisig_id: str,
         adds: list[dict],
         witness_threshold: int,
@@ -1744,10 +1923,10 @@ async def update_multisig_witnesses(
 
 
 async def complete_multisig_witnesses(
-    app: "LocksmithApplication",
-    multisig_id: str,
-    rot: bytes,
-    data: list[dict],
+        app,
+        multisig_id: str,
+        rot: bytes,
+        data: list[dict],
 ) -> Dict[str, Any]:
     """
     Complete witness rotation for a multisig identifier.
@@ -1828,4 +2007,3 @@ async def rotate_multisig_identifier(app, ghab, isith, nsith, toad, cuts, adds, 
     print(rot)
 
     return rot
-

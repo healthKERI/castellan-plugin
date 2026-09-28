@@ -575,8 +575,8 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
             self.show_error(f"Failed to add witnesses: {error}")
 
             self.add_witnesses_button.setEnabled(True)
-            self.add_witnesses_button.setText("Add Witnesses")
 
+        self.add_witnesses_button.setText("Add Witnesses")
         self.cancel_button.setText("Done")
         self.cancel_button.setEnabled(True)
 

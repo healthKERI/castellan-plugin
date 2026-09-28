@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
 )
 from keri import help
 from keri.core import parsing
+from keri.core.serdering import SerderKERI
 from keri.db import basing
 from keri.help import helping
 from locksmith.ui import colors
@@ -542,7 +543,6 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
 
             # Parse KEL
             kel_bytes = result.get('kel_bytes', b'')
-            print(kel_bytes)
             if not kel_bytes:
                 self.show_error("Remote KEL is empty")
                 self.catch_up_btn.setEnabled(True)
@@ -553,7 +553,7 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
             parsing.Parser(
                 kvy=self.app.vault.kvy,
                 rvy=self.app.vault.hby.rvy,
-                local=False
+                local=True
             ).parse(ims)
             self.app.vault.kvy.processEscrows()
 
@@ -582,6 +582,16 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
             # Verify catch-up succeeded
             hab = self.app.vault.hby.habs.get(self.aid)
             if hab:
+                registry = self.identifier.get("registry", None)
+                if registry:
+                    registry_pre = registry.get("pre")
+                    if registry_pre not in self.app.vault.rgy.regs:
+                        registry_name = registry.get("registry_name")
+                        vcp = registry.get("vcp")
+                        vcp_event = SerderKERI(sad=vcp)
+
+                        self.app.vault.rgy.makeRegistry(name=registry_name, prefix=hab.pre, vcp=vcp_event)
+
                 local_state = hab.kever.state()
                 local_sn = int(local_state.s, 16)
 

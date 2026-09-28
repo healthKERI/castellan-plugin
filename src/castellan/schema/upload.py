@@ -17,10 +17,6 @@ from locksmith.ui.toolkit.widgets import LocksmithDialog, LocksmithButton, Locks
 from locksmith.ui.toolkit.widgets.extensible import ExtensibleSelectorWidget
 from ..core import remoting
 
-if TYPE_CHECKING:
-    from locksmith.core.apping import LocksmithApplication
-    from locksmith.ui.vault.page import VaultPage
-
 logger = help.ogler.getLogger(__name__)
 
 
@@ -29,9 +25,9 @@ class UploadSchemaDialog(LocksmithDialog):
 
     def __init__(
         self,
-        app: "LocksmithApplication",
+        app,
         on_refresh: Callable[[], None] | None = None,
-        parent: "VaultPage | None" = None,
+        parent = None,
     ):
         self.app = app
         self.on_refresh = on_refresh
@@ -109,7 +105,7 @@ class UploadSchemaDialog(LocksmithDialog):
                     'title': title,
                     'version': version,
                     'description': description,
-                    'sad': sad,
+                    'schemer': schemer,
                 }))
 
             if items:
@@ -144,10 +140,11 @@ class UploadSchemaDialog(LocksmithDialog):
             for _text, data in selected:
                 if data is None:
                     continue
+                schemer = data['schemer']
                 result = await remoting.upload_schema(
                     app=self.app,
                     schema_said=data['said'],
-                    sad=data['sad'],
+                    sad=schemer.sed,
                 )
                 if not result.get('success'):
                     errors.append(f"{data['title']}: {result.get('error', 'Unknown error')}")

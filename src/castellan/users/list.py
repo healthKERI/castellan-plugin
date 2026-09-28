@@ -199,7 +199,6 @@ class UsersListPage(QWidget):
             logger.error(f"User {user_id} not in cache")
             return
 
-        logger.info(f"Opening view dialog for user: {user_id}")
         dialog = ViewUserDialog(user=user, parent=self)
         dialog.show()
 

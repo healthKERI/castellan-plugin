@@ -14,10 +14,6 @@ from keri.help import helping
 from locksmith.ui.toolkit.widgets import LocksmithDialog, LocksmithButton
 from locksmith.ui.toolkit.widgets.fields import LocksmithLineEdit, LocksmithPlainTextEdit
 from locksmith.ui.toolkit.widgets.buttons import LocksmithCopyButton
-from locksmith.ui import colors
-
-if TYPE_CHECKING:
-    from locksmith.ui.vault.page import VaultPage
 
 logger = help.ogler.getLogger(__name__)
 
@@ -25,7 +21,7 @@ logger = help.ogler.getLogger(__name__)
 class ViewUserDialog(LocksmithDialog):
     """Read-only dialog displaying user account details."""
 
-    def __init__(self, user: dict, parent: "VaultPage | None" = None):
+    def __init__(self, user: dict, parent = None):
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
         layout.setContentsMargins(0, 10, 0, 0)

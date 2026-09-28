@@ -14,16 +14,13 @@ from locksmith.ui.toolkit.widgets import LocksmithDialog, LocksmithButton
 from locksmith.ui.toolkit.widgets.fields import LocksmithLineEdit, LocksmithPlainTextEdit
 from locksmith.ui.toolkit.widgets.buttons import LocksmithCopyButton
 
-if TYPE_CHECKING:
-    from locksmith.ui.vault.page import VaultPage
-
 logger = help.ogler.getLogger(__name__)
 
 
 class ViewSchemaDialog(LocksmithDialog):
     """Read-only dialog displaying all fields of a schema from Castellan."""
 
-    def __init__(self, schema: dict, parent: "VaultPage | None" = None):
+    def __init__(self, schema: dict, parent = None):
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
         layout.setContentsMargins(0, 10, 0, 0)
@@ -34,7 +31,7 @@ class ViewSchemaDialog(LocksmithDialog):
         version = schema.get('version', '')
         description = schema.get('description', '')
         created_at = schema.get('created_at', '')
-        sad = schema.get('sad', {})
+        sad = schema
 
         self._add_field_row(layout, "SAID", said, monospace=True, copyable=True)
         self._add_field_row(layout, "Title", title)
