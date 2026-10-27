@@ -5,13 +5,17 @@ castellan.issuers.view_registry module
 Dialog for viewing a registry that is being created for a multisig identifier.
 Shows registry details, member signature status, and allows signing the IXN event.
 """
+
 import qasync
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 from keri import help
+from keri.core import serdering
 from keri.help import helping
 from locksmith.ui import colors
 from locksmith.ui.toolkit.widgets import LocksmithDialog, LocksmithInvertedButton, LocksmithButton
+
+from ..core import remoting
 
 logger = help.ogler.getLogger(__name__)
 
@@ -109,7 +113,7 @@ class ViewRegistryCreationDialog(LocksmithDialog):
 
         value_label = QLabel(self.aid or "Unknown")
         value_label.setStyleSheet(f"color: {colors.TEXT_MENU};")
-        value_label.setWordWrap(True)
+        value_label.setWordWrap(False)
         field_layout.addWidget(value_label)
 
         field_layout.addStretch()
@@ -186,9 +190,9 @@ class ViewRegistryCreationDialog(LocksmithDialog):
         self.content_layout.addSpacing(8)
 
         # Get registry info from vcp field
-        vcp = self.identifier.get('vcp', {})
-        registry_name = vcp.get('name', 'Unknown')
-        registry_id = vcp.get('registry_id', vcp.get('i', 'Unknown'))
+        current_metadata = self.identifier.get('current_metadata', {})
+        self.registry_name = current_metadata.get('registry_name', 'Unknown')
+        self.registry_id = current_metadata.get('registry_said', 'Unknown')
 
         # Create details frame
         details_frame = QFrame()
@@ -211,7 +215,7 @@ class ViewRegistryCreationDialog(LocksmithDialog):
         name_label.setStyleSheet(f"font-weight: 600; color: {colors.TEXT_MENU};")
         name_label.setFixedWidth(135)
         name_row.addWidget(name_label)
-        name_value = QLabel(registry_name)
+        name_value = QLabel(self.registry_name)
         name_value.setStyleSheet(f"color: {colors.TEXT_MENU};")
         name_value.setWordWrap(False)
         name_row.addWidget(name_value, stretch=1)
@@ -223,7 +227,7 @@ class ViewRegistryCreationDialog(LocksmithDialog):
         id_label.setStyleSheet(f"font-weight: 600; color: {colors.TEXT_MENU};")
         id_label.setFixedWidth(135)
         id_row.addWidget(id_label)
-        id_value = QLabel(registry_id)
+        id_value = QLabel(self.registry_id)
         id_value.setStyleSheet(f"color: {colors.TEXT_MENU};")
         id_value.setWordWrap(False)
         id_row.addWidget(id_value, stretch=1)
@@ -282,7 +286,7 @@ class ViewRegistryCreationDialog(LocksmithDialog):
         row_layout.addWidget(name_label, stretch=3)
 
         # Status badge - check if member has signed the registry
-        has_signed = member.get('signature_received', False)
+        has_signed = member.get('current_signature', None) is not None
         status_label = QLabel("Signed" if has_signed else "Not Signed")
         status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -355,6 +359,8 @@ class ViewRegistryCreationDialog(LocksmithDialog):
         self.sign_btn.setEnabled(False)
         self.sign_btn.setText("Signing...")
 
+        multisig_id = self.identifier.get('id')
+
         try:
             # Get the hab for this identifier
             hab = self.app.vault.hby.habs.get(self.aid)
@@ -362,15 +368,30 @@ class ViewRegistryCreationDialog(LocksmithDialog):
                 self.show_error(f"Identifier {self.aid} is not controlled locally")
                 return
 
-            # Get VCP data
-            vcp_data = self.identifier.get('vcp', {})
-            if not vcp_data:
-                self.show_error("No registry VCP data found")
-                return
+            # Sign all the events required
+            anc = serdering.SerderKERI(sad=self.identifier.get("current_event"))
+            siger = hab.sign(ser=anc.raw, indexed=True).pop()
+            mbx = serdering.SerderKERI(sad=self.identifier.get("mbx"))
+            mbx_siger = hab.sign(ser=mbx.raw, indexed=True).pop()
+            rgr = serdering.SerderKERI(sad=self.identifier.get("rgr"))
+            rgr_siger = hab.sign(ser=rgr.raw, indexed=True).pop()
 
-            # For now, show a placeholder message
-            logger.info(f"Signing registry for identifier {self.aid}")
-            self.show_error("Registry signing not yet implemented")
+            # Upload to server
+            result = await remoting.add_multisig_registry_signature(
+                app=self.app,
+                multisig_id=multisig_id,
+                ixn_said=anc.said,
+                ixn_siger=siger,
+                mailbox_said=mbx.said,
+                mailbox_siger=mbx_siger,
+                registrar_said=rgr.said,
+                registrar_siger=rgr_siger
+            )
+
+            if not result.get('success'):
+                error_msg = result.get('error', 'Unknown error')
+                self.show_error(f"Failed to create registry: {error_msg}")
+                return
 
         except Exception as e:
             logger.exception(f"Error signing registry: {e}")

@@ -19,7 +19,7 @@ from locksmith.ui.toolkit.tables import PaginatedTableWidget
 from .enable_credential_issuance import EnableCredentialIssuanceDialog
 from .upload import UploadIdentifierDialog
 from .view import ViewIdentifierDialog
-from .view_inception import ViewIceptionMultisigIdentifierDialog
+from .view_inception import ViewInceptionMultisigIdentifierDialog
 from .view_live import ViewLiveMultisigIdentifierDialog
 from .view_registry import ViewRegistryCreationDialog
 from .view_single import ViewSingleIdentifierDialog
@@ -65,7 +65,7 @@ class IdentifiersListPage(QWidget):
 
         self.table = PaginatedTableWidget(
             columns=["Alias", "AID", "Status", "Seq No"],
-            column_widths={"Alias": 140, "Status": 165, "Actions": 50, "Seq No": 100},
+            column_widths={"Alias": 140, "Status": 210, "Actions": 50, "Seq No": 75},
             title="Issuers",
             icon_path=":/assets/material-icons/group.svg",
             show_add_button=True,
@@ -302,7 +302,7 @@ class IdentifiersListPage(QWidget):
             case "single":
                 dialog = ViewSingleIdentifierDialog(app=self.app, identifier=identifier, parent=self)
             case "inception" | "inception_joined" | "inception_ready" | "inception_created" | "inception_signed":
-                dialog = ViewIceptionMultisigIdentifierDialog(app=self.app, identifier=identifier, row_data=row_data, parent=self)
+                dialog = ViewInceptionMultisigIdentifierDialog(app=self.app, identifier=identifier, row_data=row_data, parent=self)
                 dialog.closed.connect(self.on_show)
             case "registry_created" | "registry_signed":
                 dialog = ViewRegistryCreationDialog(app=self.app, identifier=identifier, row_data=row_data, parent=self)

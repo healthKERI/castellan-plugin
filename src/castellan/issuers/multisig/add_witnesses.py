@@ -203,7 +203,6 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
 
     def on_show(self, aid=None, identifier=None):
         """Called when the page becomes visible."""
-        logger.info(f"WitnessCreatePage: on_show({aid})")
         self.aid = aid
         self.identifier = identifier
 
@@ -785,7 +784,6 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
 
     def _on_done_clicked(self):
         """Handle Done button click - navigate back to witness list."""
-        logger.info("Done button clicked - returning to Identifier list")
         # If witnesses were created, emit witness_created signal to trigger list refresh
         # Otherwise emit cancelled signal
         if self.created_witnesses:
@@ -796,7 +794,7 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
 
     def _on_rotate_clicked(self):
         """Handle Rotate button click - navigate to identifier rotation with pre-populated witnesses."""
-        logger.info("Rotate button clicked - navigating to identifier rotation")
+        pass
 
         # Get the selected identifier info
 

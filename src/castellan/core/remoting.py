@@ -14,14 +14,11 @@ import json
 import urllib.parse
 from typing import Dict, Any, Optional
 
-from keri.app import signing
-from keri.core import parsing, serdering, coring
+from keri import help
+from keri.core import parsing, Siger
 from keri.core.scheming import Schemer
 from keri.kering import Ilks
-from keri.vc import protocoling
 from locksmith.core.credentialing import outputCred
-
-from keri import help
 
 logger = help.ogler.getLogger(__name__)
 
@@ -1566,10 +1563,13 @@ async def add_multisig_signature_identifier(
 async def create_multisig_registry(
         app,
         multisig_id: str,
-        vcp_bytes: bytes,
-        ixn_bytes: bytes,
-        mailbox_bytes: bytes,
-        registrar_bytes: bytes,
+        vcp: dict,
+        ixn: dict,
+        ixn_siger: Siger,
+        mailbox: dict,
+        mailbox_siger: Siger,
+        registrar: dict,
+        registrar_siger: Siger,
         registry_name: str,
 ) -> Dict[str, Any]:
     """
@@ -1578,10 +1578,13 @@ async def create_multisig_registry(
     Args:
         app: The Locksmith application instance
         multisig_id: The multisig identifier AID (URL-encoded)
-        vcp_bytes: The VCP (registry inception) event bytes
-        ixn_bytes: The IXN (interaction) event bytes that anchor the VCP
-        mailbox_bytes: The mailbox event bytes
-        registrar_bytes: The registrar event bytes
+        vcp: The VCP (registry inception) event
+        ixn: The IXN (interaction) event
+        ixn_siger: The IXN (interaction) event signature
+        mailbox: The mailbox event
+        mailbox_siger: The mailbox event signature
+        registrar: The registrar event
+        registrar_siger: The registrar event signature
         registry_name: User-friendly name for the registry
 
     Returns:
@@ -1593,21 +1596,91 @@ async def create_multisig_registry(
 
     try:
         # Build multipart form with VCP, IXN, and body
-        files = {
-            'vcp': ('vcp.cesr', vcp_bytes, 'application/octet-stream'),
-            'ixn': ('ixn.cesr', ixn_bytes, 'application/octet-stream'),
-            'mailbox': ('mailbox.cesr', mailbox_bytes, 'application/octet-stream'),
-            'registrar': ('registrar.cesr', registrar_bytes, 'application/octet-stream'),
-            'body': ('body.json', json.dumps({'name': registry_name}), 'application/json'),
-        }
-
+        body = dict(
+            name=registry_name,
+            vcp=vcp,
+            ixn=ixn,
+            ixn_siger=ixn_siger.qb64,
+            mailbox=mailbox,
+            mailbox_siger=mailbox_siger.qb64,
+            registrar=registrar,
+            registrar_siger=registrar_siger.qb64,
+        )
         # URL-encode the multisig_id
         encoded_id = urllib.parse.quote(multisig_id, safe='')
 
         response = await essr.request(
             path=f"/multisig/identifiers/{encoded_id}/registries",
             method="POST",
-            files=files,
+            json=body,
+            timeout=60,
+        )
+
+        if response is not None and response.status_code in (200, 201):
+            return {'success': True, 'data': response.json() if response.content else {}}
+        else:
+            if response is not None:
+                logger.error(f"Create registry failed with status {response.status_code}: {response.text}")
+                try:
+                    error_msg = response.json().get('description', f"Status {response.status_code}")
+                except Exception:
+                    error_msg = f"Status {response.status_code}"
+            else:
+                error_msg = "No response"
+            return {'success': False, 'error': error_msg}
+
+    except Exception as e:
+        logger.exception(f"Error creating registry: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def add_multisig_registry_signature(
+        app,
+        multisig_id: str,
+        ixn_said: str,
+        ixn_siger: Siger,
+        mailbox_said: str,
+        mailbox_siger: Siger,
+        registrar_said: str,
+        registrar_siger: Siger,
+) -> Dict[str, Any]:
+    """
+    Create a credential registry for a multisig identifier.
+
+    Args:
+        app: The Locksmith application instance
+        multisig_id: The multisig identifier AID (URL-encoded)
+        ixn_said: The IXN (interaction) event SAID
+        ixn_siger: The IXN (interaction) event signature
+        mailbox_said: The mailbox event SAID
+        mailbox_siger: The mailbox event signature
+        registrar_said: The registrar event SAID
+        registrar_siger: The registrar event signature
+
+    Returns:
+        Dict with 'success' boolean and optional 'error' or 'data' keys
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        # Build multipart form with VCP, IXN, and body
+        body = dict(
+            ixn_said=ixn_said,
+            ixn_siger=ixn_siger.qb64,
+            mailbox_said=mailbox_said,
+            mailbox_siger=mailbox_siger.qb64,
+            registrar_said=registrar_said,
+            registrar_siger=registrar_siger.qb64,
+        )
+        # URL-encode the multisig_id
+        encoded_id = urllib.parse.quote(multisig_id, safe='')
+
+        response = await essr.request(
+            path=f"/multisig/identifiers/{encoded_id}/registries/signatures",
+            method="POST",
+            json=body,
             timeout=60,
         )
 
@@ -1699,7 +1772,7 @@ async def complete_multisig_credential(
         ixn_bytes: bytes,
 ) -> Dict[str, Any]:
     """
-    Create a credential registry for a multisig identifier.
+    Complete a multisig credential issuance.
 
     Args:
         app: The Locksmith application instance
@@ -1755,7 +1828,7 @@ def get_multisig_state(app, identifier) -> str:
     current_event = identifier.get("current_event", None)
     key_state = identifier.get("key_state", None)
     rotation_request = identifier.get("rotation_request", None)
-    vcp = identifier.get("vcp", None)
+    tel_event = identifier.get("current_tel_event", None)
     my_member = get_my_member(app, identifier)
 
     if identifier.get('aid') is None:
@@ -1769,9 +1842,9 @@ def get_multisig_state(app, identifier) -> str:
     if rotation_request:
         return "rotation" if has_joined(app, identifier) else "rotation_joined"
 
-    elif vcp:
+    if tel_event and tel_event.get("t") == "vcp":
         # Registry creation in progress - behaves like inception states
-        return "registry_signed" if has_joined(app, identifier) else "registry_created"
+        return "registry_signed" if has_signed(app, identifier) else "registry_created"
 
     elif current_event:
         ilk = current_event.get('t')
@@ -1830,6 +1903,12 @@ def has_joined(app, identifier) -> bool:
     """Check if current user has joined the multisig."""
     my_member = get_my_member(app, identifier)
     return has_approved(app, identifier) and my_member.get('public_key', None)
+
+
+def has_signed(app, identifier) -> bool:
+    """Check if current user has signed the multisig."""
+    my_member = get_my_member(app, identifier)
+    return my_member.get('current_signature', None) is not None
 
 
 async def load_multisig_member_kels(app, identifier):
@@ -1891,8 +1970,6 @@ async def update_multisig_witnesses(
             'cuts': cuts,
             'witness_threshold': witness_threshold,
         }
-
-        print(json.dumps(body, indent=2))
 
         # URL-encode the multisig_id
         encoded_id = urllib.parse.quote(multisig_id, safe='')

@@ -138,12 +138,10 @@ class UploadedIdentifierPoller(doing.Doer):
         vault's Kevery so the peer appears in vault.kvy.kevers before group
         inception requires their keystate.
         """
-        logger.info(f"_fetch_and_parse_kel: starting for {aid[:16]}... (alias={alias})")
         if not self.app.vault:
             logger.warning(f"_fetch_and_parse_kel: vault is not available, skipping {aid[:16]}...")
             return
         if aid in self.app.vault.kvy.kevers:
-            logger.info(f"_fetch_and_parse_kel: {aid[:16]}... already in kevers, skipping")
             return  # already known
 
         try:
@@ -157,11 +155,9 @@ class UploadedIdentifierPoller(doing.Doer):
                 logger.warning(f"Empty KEL returned for {aid[:16]}...")
                 return
 
-            logger.info(f"_fetch_and_parse_kel: received {len(kel_bytes)} bytes of KEL for {aid[:16]}...")
             ims = bytearray(kel_bytes)
             parsing.Parser(kvy=self.app.vault.kvy, rvy=self.app.vault.hby.rvy, local=False).parse(ims)
             self.app.vault.kvy.processEscrows()
-            logger.info(f"_fetch_and_parse_kel: KEL parsed and escrows processed for {aid[:16]}...")
 
             remoteId = {
                 'alias': alias,
@@ -179,9 +175,9 @@ class UploadedIdentifierPoller(doing.Doer):
                         'success': True
                     }
                 )
-                logger.info(f"_fetch_and_parse_kel: remote_identifier_imported signal emitted for {aid[:16]}...")
             else:
                 logger.warning(f"_fetch_and_parse_kel: vault.signals is not available, could not emit event for {aid[:16]}...")
+
             logger.info(f"KEL parsed for peer {aid[:16]}…")
         except Exception as e:
             logger.warning(f"KEL parse failed for {aid[:16]}...: {e}")

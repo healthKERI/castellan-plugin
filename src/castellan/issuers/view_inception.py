@@ -21,7 +21,7 @@ from ..core import remoting
 logger = help.ogler.getLogger(__name__)
 
 
-class ViewIceptionMultisigIdentifierDialog(LocksmithDialog):
+class ViewInceptionMultisigIdentifierDialog(LocksmithDialog):
     """Read-only dialog displaying an identifier uploaded to the Castellan server."""
 
     closed = Signal()

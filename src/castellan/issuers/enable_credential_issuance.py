@@ -130,101 +130,50 @@ class EnableCredentialIssuanceDialog(LocksmithDialog):
                 self.show_error(f"Identifier {self.aid} is not controlled locally")
                 return
 
-            member_index = hab.smids.index(hab.mhab.pre)
-            tholder = hab.kever.tholder
+            # Create registry locally
+            logger.info(f"Creating registry '{registry_name}' for {self.aid}")
 
-            # If our signature is enough to create the registry, do so, otherwise create without parsing
-            if tholder.satisfy([member_index]):
-                registry = self.app.vault.rgy.makeRegistry(
-                    name=registry_name,
-                    prefix=hab.pre,
-                    noBackers=True,
-                    baks=[],
-                    toad=0,
-                    nonce=coring.randomNonce(),
-                )
+            self.vcp = veventing.incept(hab.pre,
+                                       baks=[],
+                                       toad=0,
+                                       nonce=coring.randomNonce(),
+                                       cnfg=[TraitDex.NoBackers],
+                                       code=coring.MtrDex.Blake3_256)
 
-                # Create registry seal
-                regd = getattr(registry, "regd", registry.regk)
-                rseal = {"i": registry.regk, "s": "0", "d": regd}
+            # Create registry seal
+            regd = self.vcp.said
+            rseal = {"i": self.vcp.pre, "s": "0", "d": regd}
 
-                # Create and sign IXN to anchor the VCP
-                anc = hab.interact(data=[rseal])
+            # Create and sign IXN to anchor the VCP
+            kever = hab.kever
+            ixn = eventing.interact(pre=kever.prefixer.qb64,
+                                       dig=kever.serder.said,
+                                       sn=kever.sner.num + 1,
+                                       data=[rseal])
 
-                seqner = coring.Seqner(sn=hab.kever.sner.num)
-                saider = coring.Saider(qb64=hab.kever.serder.said)
-                registry.anchorMsg(pre=registry.regk,
-                                   regd=registry.regd,
-                                   seqner=seqner,
-                                   saider=saider)
+            ixn_siger = hab.sign(ser=ixn.raw)[0]
 
-                hab.kvy.processEscrows()
-                self.app.vault.rgy.processEscrows()
-
-                # Get event bytes
-                vcp_bytes = bytearray()
-                for msg in self.app.vault.rgy.reger.clonePreIter(registry.regk):
-                    vcp_bytes.extend(msg)
-
-                if not vcp_bytes:
-                    raise ValueError("Failed to retrieve registry event bytes")
-
-                ixn_bytes = bytes(anc)
-
-                # Now create the end roles declaring castellan as both a mailbox and a registrar
-                route = "/end/role/add"
-                data = dict(cid=hab.pre, role=Roles.mailbox, eid=settings.castellan_aid)
-                mailbox_bytes = hab.reply(route=route, data=data)
-                data = dict(cid=hab.pre, role=Roles.registrar, eid=settings.castellan_aid)
-                registrar_bytes = hab.reply(route=route, data=data)
-
-            else:
-                # Create registry locally
-                logger.info(f"Creating registry '{registry_name}' for {self.aid}")
-
-                self.vcp = veventing.incept(hab.pre,
-                                           baks=[],
-                                           toad=0,
-                                           nonce=coring.randomNonce(),
-                                           cnfg=[TraitDex.NoBackers],
-                                           code=coring.MtrDex.Blake3_256)
-
-                # Create registry seal
-                regd = self.vcp.said
-                rseal = {"i": self.vcp.pre, "s": "0", "d": regd}
-
-                # Create and sign IXN to anchor the VCP
-                kever = hab.kever
-                serder = eventing.interact(pre=kever.prefixer.qb64,
-                                           dig=kever.serder.said,
-                                           sn=kever.sner.num + 1,
-                                           data=[rseal])
-
-                sigers = hab.sign(ser=serder.raw)
-                anc = eventing.messagize(serder, sigers=sigers)
-
-                # Get event bytes
-                vcp_bytes = bytearray()
-                for msg in self.app.vault.rgy.reger.clonePreIter(self.vcp.pre):
-                    vcp_bytes.extend(msg)
-                ixn_bytes = bytes(anc)
-
-                # Now create the end roles declaring castellan as both a mailbox and a registrar
-                route = "/end/role/add"
-                data = dict(cid=hab.pre, role=Roles.mailbox, eid=settings.castellan_aid)
-                mailbox_bytes = hab.reply(route=route, data=data)
-                data = dict(cid=hab.pre, role=Roles.registrar, eid=settings.castellan_aid)
-                registrar_bytes = hab.reply(route=route, data=data)
+            # Now create the end roles declaring castellan as both a mailbox and a registrar
+            route = "/end/role/add"
+            data = dict(cid=hab.pre, role=Roles.mailbox, eid=settings.castellan_aid)
+            mailbox = eventing.reply(route=route, data=data)
+            mailbox_siger = hab.sign(ser=mailbox.raw)[0]
+            data = dict(cid=hab.pre, role=Roles.registrar, eid=settings.castellan_aid)
+            registrar = eventing.reply(route=route, data=data)
+            registrar_siger = hab.sign(ser=registrar.raw)[0]
 
 
             # Upload to server
             result = await remoting.create_multisig_registry(
                 app=self.app,
                 multisig_id=multisig_id,
-                vcp_bytes=bytes(vcp_bytes),
-                ixn_bytes=ixn_bytes,
-                mailbox_bytes=mailbox_bytes,
-                registrar_bytes=registrar_bytes,
+                vcp=self.vcp.sad,
+                ixn=ixn.sad,
+                ixn_siger=ixn_siger,
+                mailbox=mailbox.sad,
+                mailbox_siger=mailbox_siger,
+                registrar=registrar.sad,
+                registrar_siger=registrar_siger,
                 registry_name=registry_name,
             )
 
