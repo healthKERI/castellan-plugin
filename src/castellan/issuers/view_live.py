@@ -480,7 +480,7 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
         """Load key state for side-by-side comparison."""
         # Local key state
         hab = self.app.vault.hby.habs.get(self.aid) if self.app.vault else None
-        if hab is not None:
+        if hab is not None and hab.kever is not None:
             local_state = hab.kever.state()
             local_sn = int(local_state.s, 16)
             self._set_key_state_details(self._local_comparison, [
@@ -523,7 +523,6 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
         self.catch_up_btn.setText("Catching Up...")
 
         try:
-            print(json.dumps(self.identifier, indent=2))
             # Oobi with witnesses if we don't already know about them:
             for witness in self.identifier['witnesses']:
                 if witness.get('witness_aid') not in self.app.hby.kevers:

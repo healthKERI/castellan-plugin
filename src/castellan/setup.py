@@ -397,7 +397,6 @@ class CastellanAdminSetupPage(LocksmithFormPage):
             self.show_error(str(e))
 
     def on_show(self) -> None:
-        logger.info("Castellan setup shown")
         # This page is created once and reused for the app's lifetime (see
         # CastellanPlugin._build_pages), so a stale "Completing Setup..."
         # disabled state from a prior successful/interrupted attempt can
