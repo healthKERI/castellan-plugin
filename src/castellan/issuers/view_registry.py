@@ -9,11 +9,15 @@ Shows registry details, member signature status, and allows signing the IXN even
 import qasync
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
-from keri import help
-from keri.core import serdering
+from keri import help, core, kering
+from keri.core import serdering, Siger
+from keri.core.coring import Seqner, Saider
+from keri.core.eventing import SealEvent, messagize
+from keri.db import dbing
 from keri.help import helping
 from locksmith.ui import colors
 from locksmith.ui.toolkit.widgets import LocksmithDialog, LocksmithInvertedButton, LocksmithButton
+from locksmith.ui.vault.identifiers.authenticate import WitnessAuthenticationDialog
 
 from ..core import remoting
 
@@ -32,6 +36,12 @@ class ViewRegistryCreationDialog(LocksmithDialog):
         self.state = identifier.get("_state")
         self.aid = identifier.get('aid')
         alias = identifier.get('alias', '')
+        self.ixn_said = None
+        self.ixn_siger = None
+        self.mailbox_said = None
+        self.mailbox_siger = None
+        self.registrar_said = None
+        self.registrar_siger = None
 
         # Create content widget and layout
         content_widget = QWidget()
@@ -368,30 +378,108 @@ class ViewRegistryCreationDialog(LocksmithDialog):
                 self.show_error(f"Identifier {self.aid} is not controlled locally")
                 return
 
+            current_event = self.identifier.get("current_event")
+            current_tel_event = self.identifier.get("current_tel_event")
+
             # Sign all the events required
-            anc = serdering.SerderKERI(sad=self.identifier.get("current_event"))
+            vcp_serder = serdering.SerderKERI(sad=current_tel_event)
+            anc = serdering.SerderKERI(sad=current_event)
             siger = hab.sign(ser=anc.raw, indexed=True).pop()
             mbx = serdering.SerderKERI(sad=self.identifier.get("mbx"))
             mbx_siger = hab.sign(ser=mbx.raw, indexed=True).pop()
             rgr = serdering.SerderKERI(sad=self.identifier.get("rgr"))
             rgr_siger = hab.sign(ser=rgr.raw, indexed=True).pop()
 
-            # Upload to server
-            result = await remoting.add_multisig_registry_signature(
-                app=self.app,
-                multisig_id=multisig_id,
-                ixn_said=anc.said,
-                ixn_siger=siger,
-                mailbox_said=mbx.said,
-                mailbox_siger=mbx_siger,
-                registrar_said=rgr.said,
-                registrar_siger=rgr_siger
-            )
+            members = self.identifier.get("members")
+            my_idx = hab.smids.index(hab.mhab.pre)
+            member_idxs = [my_idx]
+            sigers = [siger]
+            mbx_sigers = [mbx_siger]
+            rgr_sigers = [rgr_siger]
 
-            if not result.get('success'):
-                error_msg = result.get('error', 'Unknown error')
-                self.show_error(f"Failed to create registry: {error_msg}")
-                return
+            for member in members:
+                if member.get("current_signature"):
+                    sigers.append(Siger(qb64=member.get("current_signature")))
+                    mbx_sigers.append(Siger(qb64=member.get("mbx_signature")))
+                    rgr_sigers.append(Siger(qb64=member.get("rgr_signature")))
+                    member_idxs.append(hab.smids.index(member.get("member_aid")))
+
+            tholder = hab.kever.tholder
+
+            # If all participants are enough to create the rotation event, do so, otherwise create without parsing
+            if tholder.satisfy(member_idxs):
+                self._awaiting_auth = True
+
+                couple = Seqner(sn=anc.sn).qb64b + Saider(qb64=anc.said).qb64b
+
+                vcp = bytearray(vcp_serder.raw)
+                vcp.extend(
+                    core.Counter(
+                        core.Codens.SealSourceCouples, count=1, gvrsn=kering.Vrsn_1_0
+                    ).qb64b
+                )
+                vcp.extend(couple)
+
+                seal = SealEvent(
+                    i=anc.pre, s="{:x}".format(anc.sn), d=anc.said
+                )
+
+                mailbox = messagize(
+                    mbx,
+                    sigers=mbx_sigers,
+                    seal=seal,
+                )
+                registrar = messagize(
+                    rgr,
+                    sigers=rgr_sigers,
+                    seal=seal,
+                )
+
+                try:
+                    hab.kvy.processEvent(serder=anc, sigers=sigers)
+                    hab.psr.parse(ims=bytearray(vcp))
+                    hab.psr.parse(ims=bytearray(mailbox), local=True)
+                    hab.psr.parse(ims=bytearray(registrar), local=True)
+
+                except Exception as ex:
+                    logger.exception(f"Unable to complete registrar parsing: {ex}")
+                    self.show_error(f"Unable to parse anchor, mailbox or registrar to valid event despite enough signatures")
+                    return
+
+                self.ixn_said = anc.said
+                self.ixn_siger = siger
+                self.mailbox_said = mbx.said
+                self.mailbox_siger = mbx_siger
+                self.registrar_said = rgr.said
+                self.registrar_siger = rgr_siger
+
+                self.app.vault.signals.doer_event.connect(self._on_doer_event)
+                auth_dialog = WitnessAuthenticationDialog(
+                    app=self.app,
+                    hab=hab,
+                    witness_ids=hab.kever.wits,
+                    auth_only=True,
+                    parent=self,
+                )
+                auth_dialog.open()
+
+            else:
+                # Upload to server
+                result = await remoting.add_multisig_registry_signature(
+                    app=self.app,
+                    multisig_id=multisig_id,
+                    ixn_said=anc.said,
+                    ixn_siger=siger,
+                    mailbox_said=mbx.said,
+                    mailbox_siger=mbx_siger,
+                    registrar_said=rgr.said,
+                    registrar_siger=rgr_siger
+                )
+
+                if not result.get('success'):
+                    error_msg = result.get('error', 'Unknown error')
+                    self.show_error(f"Failed to create registry: {error_msg}")
+                    return
 
         except Exception as e:
             logger.exception(f"Error signing registry: {e}")
@@ -401,3 +489,61 @@ class ViewRegistryCreationDialog(LocksmithDialog):
             # Restore button state
             self.sign_btn.setEnabled(True)
             self.sign_btn.setText("Sign Registry")
+
+    @qasync.asyncSlot(str, str, dict)
+    async def _on_doer_event(self, doer_name: str, event_type: str, data: dict):
+        """Handle doer events from role setting and ResolveOobiDoer."""
+        # Handle OOBI resolution events
+
+        if doer_name == "AuthenticateWitnessesDoer":
+            if data['pre'] != self.aid:
+                return
+
+            self.app.vault.signals.doer_event.disconnect(self._on_doer_event)
+
+            if event_type == "witness_authentication_failed":
+                error = data['error']
+                logger.error(f"Failed to sign witnesses: {error}")
+                self.show_error(f"Failed to sign witnesses: {error}")
+
+                self.sign_btn.setEnabled(True)
+                self.sign_btn.setText("Sign Witness Addition")
+                return
+
+            try:
+                hab = self.app.vault.hby.habs.get(self.aid)
+                multisig_id = self.identifier.get('id')
+
+                wigers = []
+                dgkey = dbing.dgKey(hab.pre, self.ixn_said)  # get message
+                if wigs := hab.db.getWigs(key=dgkey):
+                    for wig in wigs:
+                        wigers.append(Siger(qb64b=bytes(wig)).qb64)
+
+
+                # Upload to server
+                result = await remoting.add_multisig_registry_signature(
+                    app=self.app,
+                    multisig_id=multisig_id,
+                    ixn_said=self.ixn_said,
+                    ixn_siger=self.ixn_siger,
+                    mailbox_said=self.mailbox_said,
+                    mailbox_siger=self.mailbox_siger,
+                    registrar_said=self.registrar_said,
+                    registrar_siger=self.registrar_siger,
+                    witness_receipts=wigers
+                )
+
+                if not result.get('success'):
+                    error_msg = result.get('error', 'Unknown error')
+                    self.show_error(f"Failed to create registry: {error_msg}")
+                    return
+
+            except Exception as e:
+                logger.exception(f"Error signing registry: {e}")
+                self.show_error(f"Error signing registry: {str(e)}")
+
+            finally:
+                # Restore button state
+                self.sign_btn.setEnabled(True)
+                self.sign_btn.setText("Sign Registry")

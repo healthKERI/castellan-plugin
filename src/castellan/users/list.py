@@ -146,7 +146,6 @@ class UsersListPage(QWidget):
             return
 
         self.my_account = self.app.vault.plugin_state["castellan"]["account"]
-        print(self.my_account)
         if self.my_account.get("role", "") == "member":
             self.table.set_add_button_visibitity(False)
         else:

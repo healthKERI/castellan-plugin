@@ -12,12 +12,13 @@ import asyncio
 import base64
 import json
 import urllib.parse
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
-from keri import help
-from keri.core import parsing, Siger
+from keri import help, core
+from keri.app.keeping import Creatory, Algos
+from keri.core import parsing, Siger, coring
 from keri.core.scheming import Schemer
-from keri.kering import Ilks
+from keri.core.serdering import SerderKERI
 from locksmith.core.credentialing import outputCred
 
 logger = help.ogler.getLogger(__name__)
@@ -1643,6 +1644,7 @@ async def add_multisig_registry_signature(
         mailbox_siger: Siger,
         registrar_said: str,
         registrar_siger: Siger,
+        witness_receipts: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Create a credential registry for a multisig identifier.
@@ -1656,6 +1658,7 @@ async def add_multisig_registry_signature(
         mailbox_siger: The mailbox event signature
         registrar_said: The registrar event SAID
         registrar_siger: The registrar event signature
+        witness_receipts: Optional list of witness receipts
 
     Returns:
         Dict with 'success' boolean and optional 'error' or 'data' keys
@@ -1674,6 +1677,9 @@ async def add_multisig_registry_signature(
             registrar_said=registrar_said,
             registrar_siger=registrar_siger.qb64,
         )
+        if witness_receipts:
+            body['witness_receipts'] = witness_receipts
+
         # URL-encode the multisig_id
         encoded_id = urllib.parse.quote(multisig_id, safe='')
 
@@ -1822,95 +1828,6 @@ async def complete_multisig_credential(
         return {'success': False, 'error': str(e)}
 
 
-def get_multisig_state(app, identifier) -> str:
-    """Determine multisig state: 'pending', 'ready', or 'active'."""
-    aid = identifier.get('aid', '')
-    current_event = identifier.get("current_event", None)
-    key_state = identifier.get("key_state", None)
-    rotation_request = identifier.get("rotation_request", None)
-    tel_event = identifier.get("current_tel_event", None)
-    my_member = get_my_member(app, identifier)
-
-    if identifier.get('aid') is None:
-        if all([member.get("member_aid", None) for member in identifier.get("members")]):
-            return "inception_ready"
-        if my_member.get("member_aid", None) is not None:
-            return "inception_joined"
-        else:
-            return "inception"
-
-    if rotation_request:
-        return "rotation" if has_joined(app, identifier) else "rotation_joined"
-
-    if tel_event and tel_event.get("t") == "vcp":
-        # Registry creation in progress - behaves like inception states
-        return "registry_signed" if has_signed(app, identifier) else "registry_created"
-
-    elif current_event:
-        ilk = current_event.get('t')
-        if ilk in (Ilks.icp, Ilks.dip):
-            return "inception_signed" if has_joined(app, identifier) else "inception_created"
-        elif ilk in (Ilks.rot, Ilks.drt):
-            return "rotation_signed" if has_joined(app, identifier) else "rotation_created"
-        else:
-            return "interact_signed" if has_joined(app, identifier) else "interact"
-
-    elif key_state:
-        if aid in app.hby.kevers:
-            kever = app.hby.kevers[aid]
-            return "live_behind" if kever.sner.num < int(key_state.get('s', '0'), 16) else "live"
-        else:
-            return "live_behind"
-    else:
-        return "single"
-
-
-def get_my_member(app, identifier) -> dict | None:
-    """Find current user's member object in the multisig, if present."""
-    my_account_aid = get_current_account_aid(app)
-    if not my_account_aid:
-        return None
-
-    members = identifier.get('members', [])
-    for member in members:
-        if member.get('account_aid') == my_account_aid:
-            return member
-
-    return None
-
-
-def get_current_account_aid(app) -> str:
-    """Get the current user's Castellan account AID."""
-    if not app or not app.vault:
-        return ""
-
-    account = app.vault.plugin_state.get("castellan", {}).get("account", {})
-    return account.get("aid", "")
-
-
-def is_member(app, identifier) -> bool:
-    """Check if current user is a member of this multisig."""
-    return get_my_member(app, identifier) is not None
-
-
-def has_approved(app, identifier) -> bool:
-    """Check if current user has joined the multisig."""
-    my_member = get_my_member(app, identifier)
-    return my_member is not None and my_member.get('member_aid') is not None
-
-
-def has_joined(app, identifier) -> bool:
-    """Check if current user has joined the multisig."""
-    my_member = get_my_member(app, identifier)
-    return has_approved(app, identifier) and my_member.get('public_key', None)
-
-
-def has_signed(app, identifier) -> bool:
-    """Check if current user has signed the multisig."""
-    my_member = get_my_member(app, identifier)
-    return my_member.get('current_signature', None) is not None
-
-
 async def load_multisig_member_kels(app, identifier):
     """ Loop through all members of a multisig identifier and load the KELs of members who are not us."""
 
@@ -1939,6 +1856,8 @@ async def load_multisig_member_kels(app, identifier):
 async def update_multisig_witnesses(
         app,
         multisig_id: str,
+        verfer,
+        diger,
         adds: list[dict],
         witness_threshold: int,
         cuts: Optional[list[str]] = None,
@@ -1966,6 +1885,8 @@ async def update_multisig_witnesses(
     try:
         # Build request body
         body = {
+            "public_key": verfer.qb64,
+            "next_key_hash": diger.qb64,
             'adds': adds,
             'cuts': cuts,
             'witness_threshold': witness_threshold,
@@ -1976,6 +1897,66 @@ async def update_multisig_witnesses(
 
         response = await essr.request(
             path=f"/multisig/identifiers/{encoded_id}/witnesses",
+            method="POST",
+            json=body,
+            timeout=60,
+        )
+
+        if response is not None and response.status_code in (200, 201):
+            return {'success': True, 'data': response.json() if response.content else {}}
+        else:
+            if response is not None:
+                logger.error(f"Update witnesses failed with status {response.status_code}: {response.text}")
+                try:
+                    error_msg = response.json().get('description', f"Status {response.status_code}")
+                except Exception:
+                    error_msg = f"Status {response.status_code}"
+            else:
+                error_msg = "No response"
+            return {'success': False, 'error': error_msg}
+
+    except Exception as e:
+        logger.exception(f"Error updating witnesses: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def sign_multisig_witnesses(
+        app,
+        multisig_id: str,
+        rot: SerderKERI,
+        sig: str,
+        witness_receipts: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Update witnesses for a multisig identifier.
+
+    Args:
+        app: The Locksmith application instance
+        multisig_id: The multisig identifier AID
+        rot: Serder of rotation event
+        sig: Signature of rotation event
+        witness_receipts: Optional list of witness receipts
+
+    Returns:
+        Dict with 'success' boolean and optional 'error' or 'data' keys
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        body = dict(
+            rot=rot.sad,
+            sig=sig
+        )
+        if witness_receipts:
+            body['witness_receipts'] = witness_receipts
+
+        # URL-encode the multisig_id
+        encoded_id = urllib.parse.quote(multisig_id, safe='')
+
+        response = await essr.request(
+            path=f"/multisig/identifiers/{encoded_id}/witnesses/rotate",
             method="POST",
             json=body,
             timeout=60,
@@ -2081,6 +2062,23 @@ async def rotate_multisig_identifier(app, ghab, isith, nsith, toad, cuts, adds, 
     rot = ghab.rotate(isith=isith, nsith=nsith, toad=toad, cuts=list(cuts), adds=list(adds),
                       data=data, verfers=verfers, digers=ndigers)
 
-    print(rot)
-
     return rot
+
+
+def get_next_keys(hab):
+    pp = hab.mgr.ks.prms.get(hab.pre)
+    ps = hab.mgr.ks.sits.get(hab.pre)
+    verfer = core.Verfer(qb64=ps.nxt.pubs[0])
+
+    pidx = pp.pidx  # get pidx for this key sequence, may be used by salty creator
+    ridx = ps.nxt.ridx + 1
+    kidx = ps.nxt.kidx + len(ps.nxt.pubs)
+
+    creator = Creatory(algo=Algos.salty).make(salt=core.Salter(qb64=pp.salt).qb64, stem=pp.stem, tier=pp.tier)
+    signers = creator.create(codes=[coring.MtrDex.Ed25519_Seed], count=0,
+                             pidx=pidx, ridx=ridx, kidx=kidx,
+                             transferable=True, temp=hab.temp)
+    diger = coring.Diger(ser=signers[0].verfer.qb64b)
+
+    return verfer, diger
+

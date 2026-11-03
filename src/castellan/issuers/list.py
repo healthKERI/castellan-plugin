@@ -16,14 +16,15 @@ from keri.help import helping
 from locksmith.ui import colors
 from locksmith.ui.toolkit.tables import PaginatedTableWidget
 
-from .enable_credential_issuance import EnableCredentialIssuanceDialog
+from .multisig.enable_credential_issuance import EnableCredentialIssuanceDialog
 from .upload import UploadIdentifierDialog
 from .view import ViewIdentifierDialog
 from .view_inception import ViewInceptionMultisigIdentifierDialog
 from .view_live import ViewLiveMultisigIdentifierDialog
 from .view_registry import ViewRegistryCreationDialog
 from .view_single import ViewSingleIdentifierDialog
-from ..core import remoting
+from .view_witness_rotate import ViewWitnessRotateDialog
+from ..core import remoting, identifying
 from ..credentials.issued.list import _exec_dialog_async
 from ..credentials.issued.server_update import ServerUpdateDialog
 
@@ -95,7 +96,7 @@ class IdentifiersListPage(QWidget):
         layout.addWidget(self.table)
 
     def _transform_identifier_to_row(self, identifier: dict[str, Any]) -> dict[str, Any]:
-        state = remoting.get_multisig_state(self.app, identifier)
+        state = identifying.get_multisig_state(self.app, identifier)
         identifier["_state"] = state
         aid = identifier.get('aid', '')
         alias = identifier.get('alias', '')
@@ -138,6 +139,18 @@ class IdentifiersListPage(QWidget):
                 state_color = colors.DANGER
             case "rotation_signed":
                 state_display = "Rotation, waiting for others"
+                state_color = colors.WARNING_YELLOW
+            case "witness_rotate":
+                state_display = "Witnesses Added"
+                state_color = colors.DANGER
+            case "witness_rotate_joined":
+                state_display = "Witnesses Added/Joined"
+                state_color = colors.WARNING_YELLOW
+            case "witness_rotate_created":
+                state_display = "Witnesses Added, pending signature"
+                state_color = colors.DANGER
+            case "witness_rotate_signed":
+                state_display = "Witnesses Added, waiting for others"
                 state_color = colors.WARNING_YELLOW
             case "registry_created":
                 state_display = "Registry, pending signature"
@@ -310,6 +323,9 @@ class IdentifiersListPage(QWidget):
             case "live" | "live_behind":
                 dialog = ViewLiveMultisigIdentifierDialog(app=self.app, identifier=identifier, row_data=row_data, parent=self)
                 dialog.closed.connect(self.on_show)
+            case "witness_rotate" | "witness_rotate_created" | "witness_rotate_signed":
+                dialog = ViewWitnessRotateDialog(app=self.app, identifier=identifier, row_data=row_data, parent=self)
+                dialog.closed.connect(self.on_show)
             case _:
                 dialog = ViewIdentifierDialog(app=self.app, identifier=identifier, row_data=row_data, parent=self)
 
@@ -356,7 +372,7 @@ class IdentifiersListPage(QWidget):
         aid = row_data.get('_aid', '')
         hab = self.app.vault.hby.habs.get(aid)
         identifier = self._identifiers_cache.get(aid)
-        key_state = identifier.get('key_state') if identifier else None
+        key_state = identifier.get('key_state', {}) if identifier else {}
         if not hab or not key_state:
             return
         dialog = ServerUpdateDialog(
@@ -364,7 +380,7 @@ class IdentifiersListPage(QWidget):
             issuer_name=hab.name,
             issuer_aid=hab.pre,
             local_sn=int(hab.kever.state().s, 16),
-            remote_sn=int(key_state.get('s', '0'), 16),
+            remote_sn=int(key_state.get('s', '0'), 16),  # type: ignore
             revoked_credential=None,
             parent=self.parent(),
         )

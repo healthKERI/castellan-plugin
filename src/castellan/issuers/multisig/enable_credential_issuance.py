@@ -15,7 +15,7 @@ from locksmith.ui import colors
 from locksmith.ui.toolkit.widgets import (
     LocksmithDialog, LocksmithInvertedButton, LocksmithButton, FloatingLabelLineEdit
 )
-from ..core import remoting
+from ...core import remoting
 
 logger = help.ogler.getLogger(__name__)
 

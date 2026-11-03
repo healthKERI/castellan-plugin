@@ -75,7 +75,6 @@ class CastellanBaser(dbing.LMDBer):
 
     def __init__(self, name="castellan", headDirPath=None, reopen=True, **kwa):
         self.castellan_settings = None
-        self.castellan_multisig_identity = None
         self.castellan_multisig_init = None
 
         super(CastellanBaser, self).__init__(name=name, headDirPath=headDirPath, reopen=reopen, **kwa)
@@ -87,12 +86,6 @@ class CastellanBaser(dbing.LMDBer):
             db=self,
             subkey='casset.',
             schema=CastellanSettings,
-        )
-
-        self.castellan_multisig_identity = koming.Komer(
-            db=self,
-            subkey='msid.',
-            schema=MultisigIdentityState,
         )
 
         self.castellan_multisig_init = koming.Komer(
