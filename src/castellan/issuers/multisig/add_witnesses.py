@@ -421,14 +421,15 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
         try:
             # Get selected witnesses
             selected_witnesses = self.add_witness_selector.get_selected_items()
-
             # Format witness data for API
             added_witnesses = []
             for display_text, witness_data in selected_witnesses:
+                totps = self.app.vault.db.encryptedWitnessOtpSecrets.get(keys=(self.aid, witness_data.get('id', '')))
                 added_witnesses.append({
                     'aid': witness_data.get('id', ''),
                     'alias': witness_data.get('alias', ''),
                     'oobi': witness_data.get('oobi', ''),
+                    'totps': totps
                 })
 
             # Get threshold
@@ -441,7 +442,6 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
 
             member_index = hab.smids.index(hab.mhab.pre)
             tholder = hab.kever.tholder
-
             # If our signature is enough to create the registry, do so, otherwise create without parsing
             if tholder.satisfy([member_index]):
                 self._awaiting_auth = True
@@ -462,12 +462,16 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
                 auth_dialog.open()
             else:
 
+                verfer, diger = remoting.get_next_keys(hab.mhab)
+
                 logger.info(f"Adding {len(added_witnesses)} witnesses to {self.aid} with threshold {threshold}")
 
                 # Call API to add witnesses
                 result = await remoting.update_multisig_witnesses(
                     app=self.app,
                     multisig_id=multisig_id,
+                    verfer=verfer,
+                    diger=diger,
                     adds=added_witnesses,
                     witness_threshold=threshold,
                     cuts=[],  # No cuts for now
@@ -484,6 +488,9 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
                     self.add_witness_selector.clear_selections()
                     self._threshold_edit.clear()
 
+                    self.add_witnesses_button.setVisible(False)
+                    self.cancel_button.setText("Close")
+                    self.cancel_button.setEnabled(True)
 
                 else:
                     error = result.get('error', 'Unknown error')
@@ -530,11 +537,6 @@ class ConfigureIssuerMultisigIdentifier(LocksmithFormPage):
 
         multisig_id = self.identifier.get('id')
         self.app.vault.signals.doer_event.disconnect(self._on_doer_event)
-
-        if not self._awaiting_auth:
-            return
-
-        self._awaiting_auth = False
 
         selected_witnesses = self.add_witness_selector.get_selected_items()
 

@@ -12,7 +12,6 @@ the standard MultisigJoinDoer (KERI Poster/mailbox transport only).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -32,10 +31,6 @@ from locksmith.ui.toolkit.widgets.fields import FloatingLabelComboBox
 
 from .doers import MultisigJoinDoer
 
-if TYPE_CHECKING:
-    from locksmith.core.apping import LocksmithApplication
-    from locksmith.ui.vault.page import VaultPage
-
 logger = logging.getLogger(__name__)
 
 
@@ -47,7 +42,7 @@ class AcceptGroupProposalDialog(LocksmithDialog):
     and the plugin intercepts the resulting notification.
     """
 
-    def __init__(self, app: "LocksmithApplication", parent: "VaultPage",
+    def __init__(self, app, parent,
                  proposal_said: str, multisig_alias: str = ""):
         self.app = app
         self.parent_widget = parent

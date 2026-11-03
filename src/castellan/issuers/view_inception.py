@@ -10,13 +10,13 @@ import json
 import qasync
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGridLayout
-from keri import help
+from keri import help, core
 from keri.core.coring import randomNonce
 from keri.help import helping
 from locksmith.ui import colors
 from locksmith.ui.toolkit.widgets import LocksmithDialog, LocksmithInvertedButton, LocksmithButton
 
-from ..core import remoting
+from ..core import remoting, identifying
 
 logger = help.ogler.getLogger(__name__)
 
@@ -470,7 +470,7 @@ class ViewInceptionMultisigIdentifierDialog(LocksmithDialog):
         local_member_hab = self.app.vault.hby.makeHab(f"{alias}_local_aid_{nonce}", ns="_castellan_multisig",
                                                       icount=1, isith="1",
                                                       ncount=1, nsith="1",
-                                                      toad=0, transferable=True)
+                                                      toad=0, transferable=True, salt=core.Salter().qb64)
         kel = local_member_hab.replay()
         data = {'member_aid': local_member_hab.pre}
 
@@ -509,7 +509,7 @@ class ViewInceptionMultisigIdentifierDialog(LocksmithDialog):
 
         # Update the identifier with the new data from the server
         self.identifier.update(result)
-        self.state = remoting.get_multisig_state(self.app, self.identifier)
+        self.state = identifying.get_multisig_state(self.app, self.identifier)
         self.identifier["_state"] = self.state
 
         # Refresh the UI to show updated state
@@ -697,7 +697,7 @@ class ViewInceptionMultisigIdentifierDialog(LocksmithDialog):
 
         # Update the identifier with the new data from the server
         self.identifier.update(result)
-        self.state = remoting.get_multisig_state(self.app, self.identifier)
+        self.state = identifying.get_multisig_state(self.app, self.identifier)
         self.identifier["_state"] = self.state
 
         # Refresh the UI to show updated state

@@ -843,12 +843,9 @@ class IssueCredentialDialog(LocksmithDialog):
             member_index = hab.smids.index(hab.mhab.pre)
             tholder = hab.kever.tholder
 
-
             # If our signature is enough to create the registry, do so, otherwise create without parsing
             if tholder.satisfy([member_index]):
                 self.app.vault.signals.doer_event.connect(self._on_doer_event)
-                print("Parsing bytes:")
-                print(ixn_bytes)
                 self.creder = creder
                 self.iss_bytes = iss_bytes
                 self.acdc_bytes = acdc_bytes

@@ -757,53 +757,6 @@ class InitiateMultisigPage(LocksmithFormPage):
         )
 
     # ------------------------------------------------------------------
-    # State persistence
-    # ------------------------------------------------------------------
-
-    def _get_db(self):
-        return self.app.vault.plugin_state.get("castellan", {}).get("db")
-
-    def _get_identity_state(self) -> MultisigIdentityState:
-        db = self._get_db()
-        if db is None:
-            return MultisigIdentityState()
-        return db.castellan_multisig_identity.get(keys=("self",)) or MultisigIdentityState()
-
-    def _save_identity_state(self, state: MultisigIdentityState):
-        db = self._get_db()
-        if db is not None:
-            db.castellan_multisig_identity.pin(keys=("self",), val=state)
-
-    def _get_group_state(self, alias: str) -> MultisigInitState:
-        db = self._get_db()
-        if db is None:
-            return MultisigInitState(group_alias=alias)
-        return db.castellan_multisig_init.get(keys=(alias,)) or MultisigInitState(group_alias=alias)
-
-    def _save_group_state(self, state: MultisigInitState):
-        db = self._get_db()
-        if db is not None:
-            db.castellan_multisig_init.pin(keys=(state.group_alias,), val=state)
-
-    def _save_threshold_config_to_group_state(self, group_alias: str):
-        """Save the pending threshold configuration to the group state."""
-        if hasattr(self, '_pending_threshold_config'):
-            state = self._get_group_state(group_alias)
-            state.threshold_config = self._pending_threshold_config
-            self._save_group_state(state)
-            logger.info(f"Saved threshold config to group state for {group_alias}")
-
-    def _find_incomplete_group_alias(self) -> str | None:
-        """Find the most recent in-progress (not yet complete) group-setup attempt."""
-        db = self._get_db()
-        if db is None:
-            return None
-        for (alias,), state in db.castellan_multisig_init.getItemIter():
-            if not state.init_complete:
-                return alias
-        return None
-
-    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
