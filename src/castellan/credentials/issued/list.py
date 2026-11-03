@@ -385,7 +385,6 @@ class IssuedCredentialsListPage(QWidget):
             if local_status != "Revoked" or remote_status == "Revoked":
                 continue
 
-            print(f"Found credential {said} with local status {local_status} and remote status {remote_status}")
             issuer_pre = credential.get('issuer', '')
             hab = self.app.vault.hby.habs.get(issuer_pre)
             if not hab:

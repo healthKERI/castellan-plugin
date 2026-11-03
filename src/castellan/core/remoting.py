@@ -1644,6 +1644,7 @@ async def add_multisig_registry_signature(
         mailbox_siger: Siger,
         registrar_said: str,
         registrar_siger: Siger,
+        witness_receipts: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Create a credential registry for a multisig identifier.
@@ -1657,6 +1658,7 @@ async def add_multisig_registry_signature(
         mailbox_siger: The mailbox event signature
         registrar_said: The registrar event SAID
         registrar_siger: The registrar event signature
+        witness_receipts: Optional list of witness receipts
 
     Returns:
         Dict with 'success' boolean and optional 'error' or 'data' keys
@@ -1675,6 +1677,9 @@ async def add_multisig_registry_signature(
             registrar_said=registrar_said,
             registrar_siger=registrar_siger.qb64,
         )
+        if witness_receipts:
+            body['witness_receipts'] = witness_receipts
+
         # URL-encode the multisig_id
         encoded_id = urllib.parse.quote(multisig_id, safe='')
 

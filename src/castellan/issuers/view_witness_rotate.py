@@ -9,7 +9,7 @@ Shows proposed witnesses, resolution status, and allows approving the rotation.
 import qasync
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
-from keri import help, kering
+from keri import help
 from keri.core import coring, Siger
 from keri.core.serdering import SerderKERI
 from keri.db import basing, dbing
@@ -799,7 +799,7 @@ class ViewWitnessRotateDialog(LocksmithDialog):
                 try:
                     hab.kvy.processEvent(serder=rot, sigers=sigers)
                 except Exception as ex:
-                    print(ex)
+                    logger.exception(f"Unable to parse rotation to valid event despite enough signatures: {ex}")
                     self.show_error(f"Unable to parse rotation to valid event despite enough signatures")
                     return
 

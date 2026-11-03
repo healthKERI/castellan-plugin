@@ -423,7 +423,6 @@ class InitiateMultisigPage(LocksmithFormPage):
             # Populate dropdown (excluding current account)
             for account in accounts:
                 aid = account.get('aid', '')
-                print(f"looking for {aid}")
                 username = account.get('username', '')
 
                 # Skip current account (it's always shown in the fixed row)

@@ -5,7 +5,6 @@ castellan.issuers.list module
 Identifiers list page — shows peer-discovery identifiers uploaded to the
 Castellan server (self + peers).
 """
-import json
 from typing import Any, Callable, TYPE_CHECKING
 
 import qasync
@@ -17,7 +16,7 @@ from keri.help import helping
 from locksmith.ui import colors
 from locksmith.ui.toolkit.tables import PaginatedTableWidget
 
-from .enable_credential_issuance import EnableCredentialIssuanceDialog
+from .multisig.enable_credential_issuance import EnableCredentialIssuanceDialog
 from .upload import UploadIdentifierDialog
 from .view import ViewIdentifierDialog
 from .view_inception import ViewInceptionMultisigIdentifierDialog
