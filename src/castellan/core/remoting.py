@@ -92,6 +92,7 @@ async def fetch_issued_credentials(
         page_size: int = 10,
         filter_term: Optional[str] = None,
         order: Optional[list] = None,
+        issuer: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Fetch issued credentials from the Castellan server (paginated)."""
     essr = _get_essr(app)
@@ -105,6 +106,8 @@ async def fetch_issued_credentials(
         if order:
             for o in order:
                 params.append(f"order={urllib.parse.quote(o)}")
+        if issuer:
+            params.append(f"issuer={urllib.parse.quote(issuer)}")
 
         path = f"/issued-credentials?{'&'.join(params)}"
         response = await essr.request(path=path, method="GET")
@@ -899,6 +902,36 @@ async def fetch_identifier_kel(app, aid: str) -> Dict[str, Any]:
             }
     except Exception as e:
         logger.error(f"Error fetching KEL for {aid}: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def fetch_issued_credential_stream(app, credential_said: str) -> Dict[str, Any]:
+    """
+    GET /issued-credentials/{said}?stream=true — fetch the CESR stream for an issued credential.
+
+    Returns dict with 'success' bool and, on success, 'stream_bytes' (raw bytes).
+    The stream contains the ACDC credential and all TEL events with attachments.
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        response = await essr.request(
+            path=f"/issued-credentials/{urllib.parse.quote(credential_said, safe='')}?stream=true",
+            method="GET",
+        )
+        if response is not None and response.status_code == 200:
+            return {'success': True, 'stream_bytes': response.content}
+        elif response is not None and response.status_code == 404:
+            return {'success': False, 'error': 'Credential not found on castellan'}
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}",
+            }
+    except Exception as e:
+        logger.error(f"Error fetching credential stream for {credential_said}: {e}")
         return {'success': False, 'error': str(e)}
 
 
