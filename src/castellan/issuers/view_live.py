@@ -1,3 +1,5 @@
+import json
+
 import qasync
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -582,7 +584,7 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
             if hab:
                 registry = self.identifier.get("registry", None)
                 if registry:
-                    registry_pre = registry.get("pre")
+                    registry_pre = registry.get("registry_pre")
                     if registry_pre not in self.app.vault.rgy.regs:
                         registry_name = registry.get("registry_name")
                         vcp = registry.get("vcp")
@@ -611,6 +613,9 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
                     remote_sn = int(result['data']['key_state'].get('s', '0'), 16)
 
                     if local_sn >= remote_sn:
+                        # Fetch and process issued credentials for this issuer
+                        await self._catch_up_issued_credentials()
+
                         self.show_success("Successfully caught up!")
                         # Close and refresh parent list
                         self.closed.emit()
@@ -627,3 +632,66 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
             self.show_error(f"Error during catch up: {str(e)}")
             self.catch_up_btn.setEnabled(True)
             self.catch_up_btn.setText("Catch Up")
+
+    async def _catch_up_issued_credentials(self):
+        """Fetch and parse issued credentials for this issuer."""
+        try:
+            # Fetch list of issued credentials for this issuer
+            result = await remoting.fetch_issued_credentials(
+                app=self.app,
+                page=0,
+                page_size=1000,
+                issuer=self.aid,
+            )
+
+            if not result.get('success'):
+                logger.warning(f"Failed to fetch issued credentials: {result.get('error')}")
+                return
+
+            credentials = result.get('credentials', [])
+            if not credentials:
+                logger.info(f"No issued credentials found for issuer {self.aid}")
+                return
+
+            # For each credential, fetch the stream and parse it
+            for cred in credentials:
+                cred_said = cred.get('said', '')
+                if not cred_said:
+                    continue
+
+                # Check if credential is already in local verifier
+                if self.app.vault.verifier.reger.saved.get(keys=(cred_said,)):
+                    logger.debug(f"Credential {cred_said} already saved locally, skipping")
+                    continue
+
+                # Fetch credential stream
+                stream_result = await remoting.fetch_issued_credential_stream(
+                    app=self.app,
+                    credential_said=cred_said,
+                )
+
+                if not stream_result.get('success'):
+                    logger.warning(f"Failed to fetch credential stream for {cred_said}: {stream_result.get('error')}")
+                    continue
+
+                stream_bytes = stream_result.get('stream_bytes', b'')
+                if not stream_bytes:
+                    logger.warning(f"Empty credential stream for {cred_said}")
+                    continue
+
+                # Parse the credential stream
+                try:
+                    ims = bytearray(stream_bytes)
+                    parsing.Parser(
+                        kvy=self.app.vault.kvy,
+                        tvy=self.app.vault.rgy.tvy,
+                        vry=self.app.vault.verifier,
+                        local=True
+                    ).parse(ims)
+                    self.app.vault.verifier.processEscrows()
+                    logger.info(f"Successfully parsed credential {cred_said}")
+                except Exception as ex:
+                    logger.exception(f"Error parsing credential stream for {cred_said}: {ex}")
+
+        except Exception as e:
+            logger.exception(f"Error catching up issued credentials: {e}")
