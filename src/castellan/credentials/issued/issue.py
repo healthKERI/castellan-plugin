@@ -4,6 +4,8 @@ locksmith.ui.vault.credentials.issued.issue module
 
 Dialog for issuing credentials
 """
+import json
+
 import qasync
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QIcon
@@ -35,16 +37,18 @@ class IssueCredentialDialog(LocksmithDialog):
 
     fetch_data = Signal()
 
-    def __init__(self, app, parent=None):
+    def __init__(self, app, parent=None, preselect_issuer_aid: str = None):
         """
         Initialize the IssueCredentialDialog.
 
         Args:
             app: Application instance
             parent: Parent widget
+            preselect_issuer_aid: Optional AID to pre-select in the issuer dropdown
         """
         self.app = app
         self._parent = parent
+        self._preselect_issuer_aid = preselect_issuer_aid
 
         # Initialize storage for dynamic fields
         self._dynamic_field_widgets = {}
@@ -242,18 +246,27 @@ class IssueCredentialDialog(LocksmithDialog):
 
             issuers = response.get('identifiers', [])
 
-            for item in issuers:
+            preselect_index = None
+            for idx, item in enumerate(issuers):
                 aid = item.get('aid', '')
                 multisig_id = item.get('id')
                 alias = item.get('alias', {})
                 registry_pre = item.get('registry', {}).get('registry_pre', '')
 
-                # Format: "Title v1.0.0"
+                # Format: "Alias (AID)"
                 display_text = f"{alias} ({aid})"
 
-                # Store the full SAID as user data
+                # Store the full data as user data
                 self.issuer_dropdown.addItem(display_text,
                                              userData=dict(id=multisig_id, aid=aid, registry_pre=registry_pre))
+
+                # Check if this is the pre-selected issuer
+                if self._preselect_issuer_aid and aid == self._preselect_issuer_aid:
+                    preselect_index = idx + 1  # +1 because of "Select an issuer..." placeholder
+
+            # Pre-select the issuer if specified
+            if preselect_index is not None:
+                self.issuer_dropdown.setCurrentIndex(preselect_index)
 
         except Exception as e:
             logger.exception(f"Error loading issuers: {e}")
@@ -781,8 +794,8 @@ class IssueCredentialDialog(LocksmithDialog):
                 self.show_error(f"Registry not found for issuer {multisig_aid}")
                 return
 
-            # Create registry locally
-            logger.info(f"Creating registry '{registry.name}' for {multisig_aid}")
+            # Create the credential
+            logger.info(f"Creating credential with '{registry.name}' for {multisig_aid}")
 
             creder = build_credential(self.app.vault.hby, hab, attributes, edges, recipient_pre, registry, rules,
                                       schema_said, self.app.vault.verifier)
@@ -800,39 +813,55 @@ class IssueCredentialDialog(LocksmithDialog):
                                        sn=kever.sner.num + 1,
                                        data=[rseal])
 
-            sigers = hab.sign(ser=serder.raw)
-            anc = eventing.messagize(serder, sigers=sigers)
+            ixn_sigers = hab.sign(ser=serder.raw)
+            anc = eventing.messagize(serder, sigers=ixn_sigers)
 
-            # Get event bytes
+            # Build ISS attachment (Counter + seal source couple)
             seqner = coring.Seqner(sn=kever.sner.num + 1)
             couple = seqner.qb64b + serder.saidb
+            iss_attachment = (
+                core.Counter(core.Codens.SealSourceCouples, count=1, gvrsn=kering.Vrsn_1_0).qb64 +
+                couple.decode('utf-8')
+            )
+
+            # Build credential attachment
+            prefixer = coring.Prefixer(qb64=iss.pre)
+            seqner_cred = coring.Seqner(num=iss.sn)
+            saider = coring.Saider(qb64=iss.said)
+
+            # Build full bytes for local processing
             iss_bytes = bytearray(iss.raw)
-            iss_bytes.extend(core.Counter(core.Codens.SealSourceCouples, count=1,
-                                    gvrsn=kering.Vrsn_1_0).qb64b)
-            iss_bytes.extend(couple)
+            iss_bytes.extend(iss_attachment.encode('utf-8'))
 
             ixn_bytes = bytes(anc)
-            acdc_bytes = signing.serialize(creder, coring.Prefixer(qb64=iss.pre),
-                                     core.Number(num=iss.sn, code=core.NumDex.Huge),
-                                     coring.Saider(qb64=iss.said))
+            acdc_bytes = signing.serialize(creder, prefixer, seqner_cred, saider)
+            credential_attachment = acdc_bytes[creder.size:]
 
             reg = self.app.vault.rgy.reger.cloneTvtAt(creder.regi)
 
             exn, atc = protocoling.ipexGrantExn(hab=hab, recp=creder.issuee, message="",
                                                 acdc=acdc_bytes, reg=reg, iss=bytes(iss_bytes), anc=ixn_bytes)
+
+            # Sign the grant exn
+            grant_sigers = hab.sign(ser=exn.raw)
+
+            # Build grant_bytes for local parsing
             msg = bytearray(exn.raw)
             msg.extend(atc)
-
             grant_bytes = bytes(msg)
 
             # Upload to server
             result = await remoting.issue_multisig_credential(
                 app=self.app,
                 multisig_id=multisig_id,
-                iss_bytes=bytes(iss_bytes),
-                ixn_bytes=ixn_bytes,
-                credential_bytes=bytes(acdc_bytes),
-                grant_bytes=grant_bytes
+                iss=iss.sad,
+                iss_attachment=iss_attachment,
+                ixn=serder.sad,
+                ixn_siger=ixn_sigers[0],
+                credential=creder.sad,
+                credential_attachment=credential_attachment.decode("utf-8"),
+                grant=exn.sad,
+                grant_siger=grant_sigers[0],
             )
 
             if not result.get('success'):

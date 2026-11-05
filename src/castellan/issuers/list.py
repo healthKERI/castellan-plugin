@@ -5,6 +5,7 @@ castellan.issuers.list module
 Identifiers list page — shows peer-discovery identifiers uploaded to the
 Castellan server (self + peers).
 """
+import json
 from typing import Any, Callable, TYPE_CHECKING
 
 import qasync
@@ -21,10 +22,12 @@ from .upload import UploadIdentifierDialog
 from .view import ViewIdentifierDialog
 from .view_inception import ViewInceptionMultisigIdentifierDialog
 from .view_live import ViewLiveMultisigIdentifierDialog
+from .view_credential_issuance import ViewCredentialIssuanceDialog
 from .view_registry import ViewRegistryCreationDialog
 from .view_single import ViewSingleIdentifierDialog
 from .view_witness_rotate import ViewWitnessRotateDialog
 from ..core import remoting, identifying
+from ..credentials.issued.issue import IssueCredentialDialog
 from ..credentials.issued.list import _exec_dialog_async
 from ..credentials.issued.server_update import ServerUpdateDialog
 
@@ -76,6 +79,7 @@ class IdentifiersListPage(QWidget):
                 "View": ":/assets/material-icons/view.svg",
                 "Update": ":/assets/material-icons/cloud_sync.svg",
                 "Enable Credential Issuance": ":/assets/material-icons/shield_lock.svg",
+                "Issue Credential": ":/assets/material-icons/badge.svg",
                 "Add Witnesses": ":/assets/material-icons/witness2.svg",
                 "Synchronize": ":/assets/material-icons/sync_lock.svg",
                 "Delete": ":/assets/material-icons/delete.svg",
@@ -158,6 +162,12 @@ class IdentifiersListPage(QWidget):
             case "registry_signed":
                 state_display = "Registry, waiting for others"
                 state_color = colors.WARNING_YELLOW
+            case "credential_created":
+                state_display = "Credential, pending signature"
+                state_color = colors.DANGER
+            case "credential_signed":
+                state_display = "Credential, waiting for others"
+                state_color = colors.WARNING_YELLOW
             case "live_behind":
                 state_display = "Remote Ahead"
                 state_color = colors.WARNING_YELLOW
@@ -216,6 +226,7 @@ class IdentifiersListPage(QWidget):
             "Update": ":/assets/material-icons/cloud_sync.svg",
             "Delete": ":/assets/material-icons/delete.svg",
             "Enable Credential Issuance": ":/assets/material-icons/shield_lock.svg",
+            "Issue Credential": ":/assets/material-icons/badge.svg",
             "Add Witnesses": ":/assets/material-icons/witness2.svg",
             "Change Witnesses": ":/assets/material-icons/witness2.svg",
             "Synchronize": ":/assets/material-icons/sync_lock.svg",
@@ -233,6 +244,10 @@ class IdentifiersListPage(QWidget):
 
         if not registry:
             actions.insert(1, "Enable Credential Issuance")  # Insert after View
+        else:
+            # Add Issue Credential for live issuers with a registry
+            if state in ('live', 'live_behind') and has_local_hab:
+                actions.insert(1, "Issue Credential")  # Insert after View
 
         if row_data.get('_is_local'):
             if row_data.get('_out_of_sync'):
@@ -293,6 +308,8 @@ class IdentifiersListPage(QWidget):
             self._view_identifier(row_data)
         elif action == "Enable Credential Issuance":
             self._on_create_registry(row_data)
+        elif action == "Issue Credential":
+            self._on_issue_credential(row_data)
         elif action == "Add Witnesses":
             self._on_add_witnesses(row_data)
         elif action == "Change Witnesses":
@@ -319,6 +336,9 @@ class IdentifiersListPage(QWidget):
                 dialog.closed.connect(self.on_show)
             case "registry_created" | "registry_signed":
                 dialog = ViewRegistryCreationDialog(app=self.app, identifier=identifier, row_data=row_data, parent=self)
+                dialog.closed.connect(self.on_show)
+            case "credential_created" | "credential_signed":
+                dialog = ViewCredentialIssuanceDialog(app=self.app, identifier=identifier, row_data=row_data, parent=self)
                 dialog.closed.connect(self.on_show)
             case "live" | "live_behind":
                 dialog = ViewLiveMultisigIdentifierDialog(app=self.app, identifier=identifier, row_data=row_data, parent=self)
@@ -356,6 +376,21 @@ class IdentifiersListPage(QWidget):
             parent=self,
         )
         dialog.exec()
+
+    def _on_issue_credential(self, row_data: dict[str, Any]):
+        """Launch Issue Credential dialog with the selected issuer pre-selected."""
+        aid = row_data.get('_aid', '')
+        identifier = self._identifiers_cache.get(aid)
+        if not identifier:
+            logger.error(f"Identifier {aid} not in cache")
+            return
+
+        dialog = IssueCredentialDialog(
+            app=self.app,
+            parent=self,
+            preselect_issuer_aid=aid,
+        )
+        dialog.show()
 
     def _on_synchronize(self, row_data: dict[str, Any]):
         """Launch Synchronize dialog for the selected identifier."""
