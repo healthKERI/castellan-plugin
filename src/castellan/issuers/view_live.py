@@ -1,15 +1,14 @@
-import json
-
 import qasync
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGridLayout
 )
 from keri import help
-from keri.core import parsing
+from keri.core import parsing, coring
 from keri.core.serdering import SerderKERI
 from keri.db import basing
 from keri.help import helping
+from keri.kering import LikelyDuplicitousError
 from locksmith.ui import colors
 from locksmith.ui.styles import get_monospace_font_family
 from locksmith.ui.toolkit.widgets import (
@@ -589,7 +588,16 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
                         vcp = registry.get("vcp")
                         vcp_event = SerderKERI(sad=vcp)
 
-                        self.app.vault.rgy.makeRegistry(name=registry_name, prefix=hab.pre, vcp=vcp_event)
+                        reg = self.app.vault.rgy.makeRegistry(name=registry_name, prefix=hab.pre, vcp=vcp_event)
+                        seqner = coring.Seqner(sn=hab.kever.sn)
+                        reg.anchorMsg(pre=reg.regk,
+                                      regd=reg.regd,
+                                      seqner=seqner,
+                                      saider=coring.Saider(qb64=hab.kever.serder.said))
+                        try:
+                            reg.tvy.processEscrows()
+                        except LikelyDuplicitousError:
+                            pass
 
                 local_state = hab.kever.state()
                 local_sn = int(local_state.s, 16)

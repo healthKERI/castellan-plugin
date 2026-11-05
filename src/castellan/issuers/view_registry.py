@@ -10,7 +10,7 @@ import qasync
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 from keri import help, core, kering
-from keri.core import serdering, Siger
+from keri.core import serdering, Siger, coring
 from keri.core.coring import Seqner, Saider
 from keri.core.eventing import SealEvent, messagize
 from keri.db import dbing
@@ -77,7 +77,7 @@ class ViewRegistryCreationDialog(LocksmithDialog):
         )
 
         close_btn.clicked.connect(self._finished)
-        self.setFixedSize(650, 840)
+        self.setFixedSize(675, 850)
 
     def _finished(self):
         self.closed.emit()
@@ -380,6 +380,8 @@ class ViewRegistryCreationDialog(LocksmithDialog):
 
             current_event = self.identifier.get("current_event")
             current_tel_event = self.identifier.get("current_tel_event")
+            current_metadata = self.identifier.get('current_metadata', {})
+            registry_name = current_metadata.get('registry_name', 'Unknown')
 
             # Sign all the events required
             vcp_serder = serdering.SerderKERI(sad=current_tel_event)
@@ -437,7 +439,14 @@ class ViewRegistryCreationDialog(LocksmithDialog):
 
                 try:
                     hab.kvy.processEvent(serder=anc, sigers=sigers)
-                    hab.psr.parse(ims=bytearray(vcp))
+                    reg = self.app.vault.rgy.makeRegistry(name=registry_name, prefix=hab.pre, vcp=vcp_serder)
+                    seqner = coring.Seqner(sn=hab.kever.sn)
+                    reg.anchorMsg(pre=reg.regk,
+                                     regd=reg.regd,
+                                     seqner=seqner,
+                                     saider=coring.Saider(qb64=hab.kever.serder.said))
+                    reg.tvy.processEscrows()
+
                     hab.psr.parse(ims=bytearray(mailbox), local=True)
                     hab.psr.parse(ims=bytearray(registrar), local=True)
 
@@ -453,33 +462,36 @@ class ViewRegistryCreationDialog(LocksmithDialog):
                 self.registrar_said = rgr.said
                 self.registrar_siger = rgr_siger
 
-                self.app.vault.signals.doer_event.connect(self._on_doer_event)
-                auth_dialog = WitnessAuthenticationDialog(
-                    app=self.app,
-                    hab=hab,
-                    witness_ids=hab.kever.wits,
-                    auth_only=True,
-                    parent=self,
-                )
-                auth_dialog.open()
-
-            else:
-                # Upload to server
-                result = await remoting.add_multisig_registry_signature(
-                    app=self.app,
-                    multisig_id=multisig_id,
-                    ixn_said=anc.said,
-                    ixn_siger=siger,
-                    mailbox_said=mbx.said,
-                    mailbox_siger=mbx_siger,
-                    registrar_said=rgr.said,
-                    registrar_siger=rgr_siger
-                )
-
-                if not result.get('success'):
-                    error_msg = result.get('error', 'Unknown error')
-                    self.show_error(f"Failed to create registry: {error_msg}")
+                if hab.kever.wits:
+                    self.app.vault.signals.doer_event.connect(self._on_doer_event)
+                    auth_dialog = WitnessAuthenticationDialog(
+                        app=self.app,
+                        hab=hab,
+                        witness_ids=hab.kever.wits,
+                        auth_only=True,
+                        parent=self,
+                    )
+                    auth_dialog.open()
                     return
+
+            # Upload to server
+            result = await remoting.add_multisig_registry_signature(
+                app=self.app,
+                multisig_id=multisig_id,
+                ixn_said=anc.said,
+                ixn_siger=siger,
+                mailbox_said=mbx.said,
+                mailbox_siger=mbx_siger,
+                registrar_said=rgr.said,
+                registrar_siger=rgr_siger
+            )
+
+            if not result.get('success'):
+                error_msg = result.get('error', 'Unknown error')
+                self.show_error(f"Failed to create registry: {error_msg}")
+                return
+
+            self._finished()
 
         except Exception as e:
             logger.exception(f"Error signing registry: {e}")

@@ -40,6 +40,11 @@ def get_multisig_state(app, identifier) -> str:
         # Registry creation in progress - behaves like inception states
         return "registry_signed" if has_signed(app, identifier) else "registry_created"
 
+    # Check for credential issuance states
+    credential = identifier.get("credential")
+    if credential:
+        return "credential_signed" if has_signed_credential(app, identifier) else "credential_created"
+
     elif current_event:
         ilk = current_event.get('t')
         if ilk in (kering.Ilks.icp, kering.Ilks.dip):
@@ -105,6 +110,17 @@ def has_signed(app, identifier) -> bool:
     return my_member.get('current_signature', None) is not None
 
 
+def has_signed_credential(app, identifier) -> bool:
+    """Check if current user has signed both IXN and grant for credential issuance."""
+    my_member = get_my_member(app, identifier)
+    if not my_member:
+        return False
+    # Credential issuance requires both signatures
+    has_ixn_sig = my_member.get('current_signature') is not None
+    has_grant_sig = my_member.get('grant_signature') is not None
+    return has_ixn_sig and has_grant_sig
+
+
 def create_multisig_rotation(hab, isith, nsith, verfers, digers:list, toad, cuts, adds, data):
     kever = hab.kever
     if isith is None:
@@ -164,25 +180,5 @@ def create_multisig_rotation(hab, isith, nsith, verfers, digers:list, toad, cuts
     # sign handles group hab with .mhab case
     my_idx = hab.smids.index(hab.mhab.pre)
     sigers = hab.mhab.sign(ser=serder.raw, indexed=True, indices=[my_idx])
-
-    # if (habord := hab.db.habs.get(keys=(hab.pre,))) is None:
-    #     raise kering.ValidationError(f"Missing HabitatRecord for pre={hab.pre}")
-    #
-    # # update own key event verifier state
-    # msg = eventing.messagize(serder, sigers=sigers)
-    #
-    # try:
-    #     hab.kvy.processEvent(serder=serder, sigers=sigers)
-    # except kering.MissingSignatureError:
-    #     pass
-    # except Exception as ex:
-    #     raise kering.ValidationError("Improper Habitat rotation for "
-    #                                  "pre={self.pre}.") from ex
-    #
-    # self.smids = smids
-    # self.rmids = rmids
-    # habord.smids = smids
-    # habord.rmids = rmids
-    # self.db.habs.pin(keys=(self.pre,), val=habord)
 
     return serder, sigers

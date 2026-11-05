@@ -308,19 +308,6 @@ class CastellanPlugin(
                 if not _is_response:
                     if not _gid or self._open_group_dialog_gid == _gid:
                         return
-                    multisig_alias = notification.get("multisig_alias", "")
-                    from .issuers.multisig.accept_group import AcceptGroupProposalDialog
-                    dialog = AcceptGroupProposalDialog(
-                        app=self._app, parent=vault_page, proposal_said=said,  # type: ignore
-                        multisig_alias=multisig_alias,
-                    )
-                    self._open_group_dialog_gid = _gid
-
-                    def _clear_group_dialog():
-                        self._open_group_dialog_gid = None
-
-                    dialog.finished.connect(_clear_group_dialog)
-                    dialog.open()
             elif "/multisig/vcp" in route:
                 _is_response = False
                 _exn = self._app.vault.hby.db.exns.get(keys=(said,))
@@ -353,17 +340,6 @@ class CastellanPlugin(
                 if not _is_response:
                     if not _gid or self._open_registry_dialog_gid == _gid:
                         return
-                    from .issuers.multisig.accept_registry import AcceptRegistryProposalDialog
-                    dialog = AcceptRegistryProposalDialog(
-                        app=self._app, parent=vault_page, proposal_said=said,  # type: ignore
-                    )
-                    self._open_registry_dialog_gid = _gid
-
-                    def _clear_registry_dialog():
-                        self._open_registry_dialog_gid = None
-
-                    dialog.finished.connect(_clear_registry_dialog)
-                    dialog.open()
         except Exception:
             logger.exception("Error handling new notification in CastellanPlugin")
 

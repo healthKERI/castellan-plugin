@@ -5,7 +5,6 @@ castellan.credentials.issued.view module
 Dialog for viewing an issued credential stored on the Castellan server.
 """
 import json
-from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 from keri import help
@@ -20,16 +19,13 @@ from locksmith.ui.toolkit.widgets import (
 from locksmith.ui.toolkit.widgets.buttons import LocksmithCopyButton
 from locksmith.ui.toolkit.widgets.fields import LocksmithLineEdit, LocksmithPlainTextEdit
 
-if TYPE_CHECKING:
-    from locksmith.ui.vault.page import VaultPage
-
 logger = help.ogler.getLogger(__name__)
 
 
 class ViewIssuedCredentialDialog(LocksmithDialog):
     """Read-only dialog displaying all fields of an issued credential from Castellan."""
 
-    def __init__(self, app, credential: dict, parent: "VaultPage | None" = None):
+    def __init__(self, app, credential: dict, parent = None):
         self.app = app
         self.org = connecting.Organizer(hby=self.app.vault.hby)
 
@@ -204,7 +200,7 @@ class ViewIssuedCredentialDialog(LocksmithDialog):
         recp = credential.get('recipient', '')
         recipient_pre = credential['sad']['a']['i']
         recipient_alias = None
-        if (remote_id := self.org.get(recp)) is not None:
+        if recp and (remote_id := self.org.get(recp)) is not None:
             recipient_alias = f'{remote_id['alias']}'
 
         recipient_label = QLabel("Recipient")

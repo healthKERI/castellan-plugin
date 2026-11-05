@@ -386,6 +386,51 @@ async def fetch_schemas(
         return {'success': False, 'error': str(e)}
 
 
+async def fetch_schema(
+        app,
+        schema_said: str,
+) -> Dict[str, Any]:
+    """
+    Fetch a single schema by SAID from the Castellan server.
+
+    Args:
+        app: The Locksmith application instance
+        schema_said: The SAID of the schema to fetch
+
+    Returns:
+        Dict with 'success' boolean and optional 'error' or 'schema' keys
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        encoded_said = urllib.parse.quote(schema_said, safe='')
+        response = await essr.request(
+            path=f"/schemas/{encoded_said}",
+            method="GET",
+            timeout=30,
+        )
+
+        if response is not None and response.status_code == 200:
+            data = response.json()
+            return {
+                'success': True,
+                'schema': data.get('schema', {}),
+                'said': data.get('said', schema_said),
+            }
+        elif response is not None and response.status_code == 404:
+            return {'success': False, 'error': 'Schema not found'}
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}"
+            }
+    except Exception as e:
+        logger.error(f"Error fetching schema: {e}")
+        return {'success': False, 'error': str(e)}
+
+
 async def fetch_all_castellan_schema_saids(app) -> set:
     """Fetch all schema SAIDs currently stored on the Castellan server."""
     essr = _get_essr(app)
@@ -1711,21 +1756,29 @@ async def add_multisig_registry_signature(
 async def issue_multisig_credential(
         app,
         multisig_id: str,
-        credential_bytes: bytes,
-        ixn_bytes: bytes,
-        iss_bytes: bytes,
-        grant_bytes: bytes
+        iss: dict,
+        iss_attachment: str,
+        ixn: dict,
+        ixn_siger,
+        credential: dict,
+        credential_attachment: str,
+        grant: dict,
+        grant_siger,
 ) -> Dict[str, Any]:
     """
-    Create a credential registry for a multisig identifier.
+    Issue a credential for a multisig identifier.
 
     Args:
         app: The Locksmith application instance
-        multisig_id: The multisig identifier AID (URL-encoded)
-        credential_bytes: The credential bytes
-        ixn_bytes: The IXN (interaction) event bytes that anchor the credential
-        iss_bytes: The ISS (issuance) TEL event bytes
-        grant_bytes: The grant EXN event bytes
+        multisig_id: The multisig identifier ID
+        iss: The ISS TEL event SAD (dict)
+        iss_attachment: CESR attachment for ISS (str)
+        ixn: The IXN event SAD (dict)
+        ixn_siger: The IXN signature (Siger object with qb64)
+        credential: The ACDC credential SAD (dict)
+        credential_attachment: CESR attachment for credential (str)
+        grant: The grant EXN event SAD (dict)
+        grant_siger: The grant signature (Siger object with qb64)
 
     Returns:
         Dict with 'success' boolean and optional 'error' or 'data' keys
@@ -1735,12 +1788,16 @@ async def issue_multisig_credential(
         return {'success': False, 'error': 'No ESSR connection'}
 
     try:
-        # Build multipart form with VCP, IXN, and body
-        files = {
-            'iss': ('iss.cesr', iss_bytes, 'application/octet-stream'),
-            'ixn': ('ixn.cesr', ixn_bytes, 'application/octet-stream'),
-            'credential': ('credential.cesr', credential_bytes, 'application/octet-stream'),
-            'grant': ('grant.cesr', grant_bytes, 'application/octet-stream'),
+        # Build JSON body
+        body = {
+            'iss': iss,
+            'iss_attachment': iss_attachment,
+            'ixn': ixn,
+            'ixn_siger': ixn_siger.qb64,
+            'credential': credential,
+            'credential_attachment': credential_attachment,
+            'grant': grant,
+            'grant_siger': grant_siger.qb64,
         }
 
         # URL-encode the multisig_id
@@ -1749,7 +1806,7 @@ async def issue_multisig_credential(
         response = await essr.request(
             path=f"/multisig/identifiers/{encoded_id}/credentials",
             method="POST",
-            files=files,
+            json=body,
             timeout=60,
         )
 
@@ -1767,7 +1824,57 @@ async def issue_multisig_credential(
             return {'success': False, 'error': error_msg}
 
     except Exception as e:
-        logger.exception(f"Error creating registry: {e}")
+        logger.exception(f"Error issuing credential: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def add_multisig_credential_signature(
+        app,
+        multisig_id: str,
+        ixn_said: str,
+        ixn_siger,
+        grant_said: str,
+        grant_siger,
+        witness_receipts: list = None
+) -> Dict[str, Any]:
+    """Add signatures for a multisig credential issuance."""
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        body = dict(
+            ixn_said=ixn_said,
+            ixn_siger=ixn_siger.qb64,
+            grant_said=grant_said,
+            grant_siger=grant_siger.qb64,
+        )
+        if witness_receipts:
+            body['witness_receipts'] = witness_receipts
+
+        encoded_id = urllib.parse.quote(multisig_id, safe='')
+        response = await essr.request(
+            path=f"/multisig/identifiers/{encoded_id}/credentials/signatures",
+            method="POST",
+            json=body,
+            timeout=60,
+        )
+
+        if response is not None and response.status_code in (200, 201):
+            return {'success': True, 'data': response.json() if response.content else {}}
+        else:
+            if response is not None:
+                logger.error(f"Add credential signature failed with status {response.status_code}: {response.text}")
+                try:
+                    error_msg = response.json().get('description', f"Status {response.status_code}")
+                except Exception:
+                    error_msg = f"Status {response.status_code}"
+            else:
+                error_msg = "No response"
+            return {'success': False, 'error': error_msg}
+
+    except Exception as e:
+        logger.exception(f"Error adding credential signature: {e}")
         return {'success': False, 'error': str(e)}
 
 

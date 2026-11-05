@@ -46,9 +46,7 @@ from locksmith.ui.toolkit.widgets.buttons import (
 from locksmith.ui.toolkit.widgets.fields import FloatingLabelLineEdit, FloatingLabelComboBox
 from locksmith.ui.toolkit.widgets.page import LocksmithFormPage
 
-from .doers import CreateRegistryDoer
 from ...core import remoting
-from ...db.basing import MultisigIdentityState, MultisigInitState
 from ...setup import SegmentedToggle
 
 from keri import help
@@ -809,14 +807,7 @@ class InitiateMultisigPage(LocksmithFormPage):
 
     def _launch_create_registry_doer(self, group_alias: str):
         """Launch CreateRegistryDoer for the given group alias."""
-        registry_name = f"{group_alias}-registry"
-        doer = CreateRegistryDoer(
-            app=self.app,
-            hab_alias=group_alias,
-            registry_name=registry_name,
-            signal_bridge=self.app.vault.signals,
-        )
-        self.app.vault.extend([doer])
+        pass
 
     # ------------------------------------------------------------------
     # Doer event listener
