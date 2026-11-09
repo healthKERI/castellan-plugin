@@ -462,11 +462,28 @@ class ViewCredentialIssuanceDialog(LocksmithDialog):
         """Handle View link click - open the ViewIssuedCredentialDialog."""
         credential_sad = self.identifier.get('credential', {})
         credential_said = credential_sad.get('d', '')
+        schema_said = credential_sad.get('s')
+        issuer = credential_sad.get('i')
+        recipient = credential_sad.get('a', {}).get('i', '')
+
+        schemer = self.app.vault.hby.db.schema.get(keys=(schema_said,))
+        if not schemer:
+            raise Exception(f"Schema {schema_said} not found")
+
+        schema_title = schemer.sed.get('title', 'Untitled')
 
         # Construct credential dict in format expected by ViewIssuedCredentialDialog
         credential_data = {
             'sad': credential_sad,
             'said': credential_said,
+            'status': "proposed",
+            'schema_said': schema_said,
+            'schema_title': schema_title,
+            'issuer': issuer,
+            'recipient': recipient,
+            'publised': False,
+            'notes': None,
+            'dynamic_fields': [],
         }
 
         dialog = ViewIssuedCredentialDialog(

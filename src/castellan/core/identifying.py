@@ -45,6 +45,10 @@ def get_multisig_state(app, identifier) -> str:
     if credential:
         return "credential_signed" if has_signed_credential(app, identifier) else "credential_created"
 
+    # Check for credential revocation states
+    if tel_event and tel_event.get("t") in ("rev", "brv"):
+        return "revocation_signed" if has_signed_revocation(app, identifier) else "revocation_created"
+
     elif current_event:
         ilk = current_event.get('t')
         if ilk in (kering.Ilks.icp, kering.Ilks.dip):
@@ -119,6 +123,15 @@ def has_signed_credential(app, identifier) -> bool:
     has_ixn_sig = my_member.get('current_signature') is not None
     has_grant_sig = my_member.get('grant_signature') is not None
     return has_ixn_sig and has_grant_sig
+
+
+def has_signed_revocation(app, identifier) -> bool:
+    """Check if current user has signed the revocation IXN event."""
+    my_member = get_my_member(app, identifier)
+    if not my_member:
+        return False
+    # Revocation only requires IXN signature (no grant needed)
+    return my_member.get('current_signature') is not None
 
 
 def create_multisig_rotation(hab, isith, nsith, verfers, digers:list, toad, cuts, adds, data):

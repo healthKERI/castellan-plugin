@@ -17,7 +17,10 @@ from locksmith.ui.toolkit.widgets import (
     EditableAddressLabelValue, EditableDateLabelValue, EditablePhoneLabelValue
 )
 from locksmith.ui.toolkit.widgets.buttons import LocksmithCopyButton
+from locksmith.ui.toolkit.widgets.collapsible import CollapsibleSection
 from locksmith.ui.toolkit.widgets.fields import LocksmithLineEdit, LocksmithPlainTextEdit
+from locksmith.ui.vault.credentials.schema_utils import parse_schema_fields, parse_edge_requirements
+from locksmith.ui.vault.credentials.field_widgets import create_readonly_field_widget
 
 logger = help.ogler.getLogger(__name__)
 
@@ -41,6 +44,9 @@ class ViewIssuedCredentialDialog(LocksmithDialog):
 
         self._build_credential_info_section(layout, credential)
 
+        # Credential Attributes section (schema-based rendering)
+        self._build_credential_attributes_section(layout, credential)
+
         # Display dynamic fields if present
         dynamic_fields = credential.get('dynamic_fields', [])
         if dynamic_fields:
@@ -60,16 +66,6 @@ class ViewIssuedCredentialDialog(LocksmithDialog):
 
             # Add spacing after dynamic fields section
             layout.addSpacing(8)
-
-        sad_label = QLabel("Raw Credental Data")
-        sad_label.setStyleSheet("font-weight: bold; font-size: 13px;")
-        layout.addWidget(sad_label)
-
-        sad_field = LocksmithPlainTextEdit()
-        sad_field.setPlainText(json.dumps(sad, indent=2))
-        sad_field.setReadOnly(True)
-        sad_field.setMinimumHeight(160)
-        layout.addWidget(sad_field)
 
         button_row = QHBoxLayout()
         button_row.addStretch()
@@ -110,6 +106,9 @@ class ViewIssuedCredentialDialog(LocksmithDialog):
             content=content_widget,
             buttons=button_row,
         )
+
+        # Raw JSON in collapsible section
+        self._build_raw_json_collapsible(layout, sad)
 
         close_btn.clicked.connect(self.close)
         button_row.addWidget(close_btn)
@@ -266,6 +265,154 @@ class ViewIssuedCredentialDialog(LocksmithDialog):
 
         layout.addWidget(info_frame)
 
+    def _build_credential_attributes_section(self, layout, credential):
+        """Build credential attributes section with schema-based rendering."""
+        # Section header
+        layout.addSpacing(8)
+        fields_label = QLabel("Credential Attributes")
+        fields_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(fields_label)
+        layout.addSpacing(10)
+
+        sad = credential.get('sad', {})
+
+        try:
+            # Get schema SAID from credential
+            schema_said = sad.get('s', '')
+            if not schema_said:
+                self._build_attributes_fallback(layout, sad)
+                return
+
+            # Parse schema fields
+            field_defs = parse_schema_fields(self.app.vault.hby, schema_said)
+
+            if not field_defs:
+                self._build_attributes_fallback(layout, sad)
+                return
+
+            # Get attribute values from credential
+            attributes = sad.get('a', {})
+
+            # Create read-only widget for each field
+            for field_def in field_defs:
+                # Get value from credential or use const default
+                value = attributes.get(field_def.name)
+                if value is None and field_def.const is not None:
+                    value = field_def.const
+
+                # Create read-only field widget
+                widget = create_readonly_field_widget(field_def, value)
+                layout.addWidget(widget)
+                layout.addSpacing(10)
+
+            # Handle edge credentials if present
+            edge_defs = parse_edge_requirements(self.app.vault.hby, schema_said)
+            if edge_defs and 'e' in sad:
+                self._build_edge_credentials_section(layout, sad, edge_defs)
+
+        except Exception as e:
+            logger.error(f"Failed to parse schema for field rendering: {e}")
+            self._build_attributes_fallback(layout, sad)
+
+    def _build_edge_credentials_section(self, layout, sad, edge_defs):
+        """Build section showing edge (chained) credentials."""
+        layout.addSpacing(15)
+
+        edges_label = QLabel("Chained Credentials")
+        edges_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(edges_label)
+        layout.addSpacing(10)
+
+        edge_data = sad.get('e', {})
+
+        for edge_def in edge_defs:
+            if edge_def.name in edge_data:
+                edge_info = edge_data[edge_def.name]
+                cred_said = edge_info.get('n', 'N/A')
+
+                # Create read-only field
+                edge_field = LocksmithLineEdit(edge_def.description)
+                edge_field.setText(cred_said)
+                edge_field.setReadOnly(True)
+                edge_field.setCursorPosition(0)
+                edge_field.setMinimumWidth(420)
+                edge_field.setStyleSheet("""
+                    QLineEdit {
+                        background-color: #F5F5F5;
+                        border: 1px solid #CCCCCC;
+                        border-radius: 6px;
+                        padding: 8px;
+                        font-size: 13px;
+                    }
+                """)
+
+                layout.addWidget(edge_field)
+                layout.addSpacing(10)
+
+    def _build_attributes_fallback(self, layout, sad):
+        """Fallback display when schema parsing fails - show attributes as simple key/value pairs."""
+        attributes = sad.get('a', {})
+        if not attributes:
+            no_attrs_label = QLabel("No attributes available")
+            no_attrs_label.setStyleSheet("font-size: 13px; color: #636466;")
+            layout.addWidget(no_attrs_label)
+            return
+
+        for key, value in attributes.items():
+            # Skip internal fields
+            if key in ('i', 'd'):
+                continue
+
+            row = QHBoxLayout()
+            key_label = QLabel(f"{key}:")
+            key_label.setStyleSheet("font-weight: 500; font-size: 13px;")
+            key_label.setFixedWidth(120)
+            row.addWidget(key_label)
+
+            value_str = str(value) if not isinstance(value, str) else value
+            value_label = QLabel(value_str)
+            value_label.setStyleSheet("font-size: 13px;")
+            value_label.setWordWrap(True)
+            row.addWidget(value_label)
+            row.addStretch()
+
+            layout.addLayout(row)
+            layout.addSpacing(5)
+
+    def _build_raw_json_collapsible(self, layout, sad):
+        """Build collapsible section for raw JSON view."""
+        layout.addSpacing(15)
+
+        # Create collapsible section
+        self.json_collapsible_section = CollapsibleSection(title="View Raw JSON")
+
+        # Content layout
+        content_layout = QVBoxLayout()
+        content_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Copy button
+        credential_json = json.dumps(sad, indent=2)
+        copy_row = QHBoxLayout()
+        self.copy_json_button = LocksmithCopyButton(copy_content=credential_json, icon_size=24)
+        copy_row.addStretch()
+        copy_row.addWidget(self.copy_json_button)
+        content_layout.addLayout(copy_row)
+
+        # JSON text field
+        self.json_field = LocksmithPlainTextEdit()
+        self.json_field.setPlainText(credential_json)
+        self.json_field.setReadOnly(True)
+        self.json_field.setFixedHeight(200)
+        self.json_field.setMaximumWidth(480)
+        font = self.json_field.font()
+        font.setFamily("Menlo, SF Mono, Monaco, Courier New, monospace")
+        font.setPointSize(11)
+        self.json_field.setFont(font)
+        content_layout.addWidget(self.json_field)
+
+        self.json_collapsible_section.set_content_layout(content_layout)
+        layout.addWidget(self.json_collapsible_section)
+        self.register_collapsible_section(self.json_collapsible_section)
 
     @staticmethod
     def _add_field_row(layout: QVBoxLayout, label: str, value: str,
