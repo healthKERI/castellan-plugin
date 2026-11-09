@@ -905,6 +905,36 @@ async def fetch_identifier_kel(app, aid: str) -> Dict[str, Any]:
         return {'success': False, 'error': str(e)}
 
 
+async def fetch_issued_credential(app, credential_said: str) -> Dict[str, Any]:
+    """
+    GET /issued-credentials/{said}?stream=true — fetch the CESR stream for an issued credential.
+
+    Returns dict with 'success' bool and, on success, 'stream_bytes' (raw bytes).
+    The stream contains the ACDC credential and all TEL events with attachments.
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        response = await essr.request(
+            path=f"/issued-credentials/{urllib.parse.quote(credential_said, safe='')}",
+            method="GET",
+        )
+        if response is not None and response.status_code == 200:
+            return {'success': True, 'credential': response.json()}
+        elif response is not None and response.status_code == 404:
+            return {'success': False, 'error': 'Credential not found on castellan'}
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}",
+            }
+    except Exception as e:
+        logger.error(f"Error fetching credential stream for {credential_said}: {e}")
+        return {'success': False, 'error': str(e)}
+
+
 async def fetch_issued_credential_stream(app, credential_said: str) -> Dict[str, Any]:
     """
     GET /issued-credentials/{said}?stream=true — fetch the CESR stream for an issued credential.
@@ -1965,6 +1995,146 @@ async def complete_multisig_credential(
 
     except Exception as e:
         logger.exception(f"Error creating registry: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def fetch_multisig_identifier_by_aid(app, aid: str) -> Dict[str, Any]:
+    """Fetch a multisig identifier by its AID from the Castellan server."""
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        encoded_aid = urllib.parse.quote(aid, safe='')
+        response = await essr.request(
+            path=f"/multisig/identifiers?aid={encoded_aid}",
+            method="GET",
+            timeout=30,
+        )
+
+        if response is not None and response.status_code == 200:
+            data = response.json()
+            identifiers = data.get('identifiers', [])
+            if identifiers:
+                return {'success': True, 'identifier': identifiers[0]}
+            return {'success': False, 'error': 'Identifier not found'}
+        else:
+            return {
+                'success': False,
+                'error': f"API error: {response.status_code if response else 'No response'}",
+            }
+    except Exception as e:
+        logger.error(f"Error fetching multisig identifier by AID: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def initiate_multisig_revocation(
+        app,
+        multisig_id: str,
+        rev: dict,
+        rev_attachment: str,
+        ixn: dict,
+        ixn_siger,
+        credential_said: str,
+) -> Dict[str, Any]:
+    """
+    Initiate revocation of a credential for a multisig identifier.
+
+    Args:
+        app: The Locksmith application instance
+        multisig_id: The multisig identifier ID
+        rev: The ISS TEL event SAD (dict)
+        rev_attachment: CESR attachment for ISS (str)
+        ixn: The IXN event SAD (dict)
+        ixn_siger: The IXN signature (Siger object with qb64)
+        credential_said: The SAID of the credential to revoke
+
+    Returns:
+        Dict with 'success' boolean and optional 'error' or 'data' keys
+    """
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        body = {
+            'credential_said': credential_said,
+            'rev': rev,
+            'rev_attachment': rev_attachment,
+            'ixn': ixn,
+            'ixn_siger': ixn_siger.qb64,
+
+        }
+
+        encoded_id = urllib.parse.quote(multisig_id, safe='')
+        response = await essr.request(
+            path=f"/multisig/identifiers/{encoded_id}/revocations",
+            method="POST",
+            json=body,
+            timeout=60,
+        )
+
+        if response is not None and response.status_code in (200, 201):
+            return {'success': True, 'data': response.json() if response.content else {}}
+        else:
+            if response is not None:
+                logger.error(f"Initiate revocation failed with status {response.status_code}: {response.text}")
+                try:
+                    error_msg = response.json().get('description', f"Status {response.status_code}")
+                except Exception:
+                    error_msg = f"Status {response.status_code}"
+            else:
+                error_msg = "No response"
+            return {'success': False, 'error': error_msg}
+
+    except Exception as e:
+        logger.exception(f"Error initiating revocation: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+async def add_multisig_revocation_signature(
+        app,
+        multisig_id: str,
+        ixn_said: str,
+        ixn_siger,
+        witness_receipts: list = None
+) -> Dict[str, Any]:
+    """Add signature for a multisig credential revocation."""
+    essr = _get_essr(app)
+    if not essr:
+        return {'success': False, 'error': 'No ESSR connection'}
+
+    try:
+        body = dict(
+            ixn_said=ixn_said,
+            ixn_siger=ixn_siger.qb64,
+        )
+        if witness_receipts:
+            body['witness_receipts'] = witness_receipts
+
+        encoded_id = urllib.parse.quote(multisig_id, safe='')
+        response = await essr.request(
+            path=f"/multisig/identifiers/{encoded_id}/revocations/signatures",
+            method="POST",
+            json=body,
+            timeout=60,
+        )
+
+        if response is not None and response.status_code in (200, 201):
+            return {'success': True, 'data': response.json() if response.content else {}}
+        else:
+            if response is not None:
+                logger.error(f"Add revocation signature failed with status {response.status_code}: {response.text}")
+                try:
+                    error_msg = response.json().get('description', f"Status {response.status_code}")
+                except Exception:
+                    error_msg = f"Status {response.status_code}"
+            else:
+                error_msg = "No response"
+            return {'success': False, 'error': error_msg}
+
+    except Exception as e:
+        logger.exception(f"Error adding revocation signature: {e}")
         return {'success': False, 'error': str(e)}
 
 

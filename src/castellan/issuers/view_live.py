@@ -1,5 +1,3 @@
-import json
-
 import qasync
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -102,10 +100,11 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
         self.content_layout.addSpacing(16)
 
         # Key state section (different for live vs live_behind)
-        if self.state == "live_behind":
-            self._add_live_behind_section()
-        else:
-            self._add_live_section()
+        self._add_live_behind_section()
+        # if self.state == "live_behind":
+        #     self._add_live_behind_section()
+        # else:
+        #     self._add_live_section()
 
     def _add_aid_field(self):
         """Add AID field with copy button."""
@@ -637,6 +636,7 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
         """Fetch and parse issued credentials for this issuer."""
         try:
             # Fetch list of issued credentials for this issuer
+            # TODO:  Add time based filtering so we can catch up since the last time we ran.
             result = await remoting.fetch_issued_credentials(
                 app=self.app,
                 page=0,
@@ -659,9 +659,12 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
                 if not cred_said:
                     continue
 
+                remote_status = cred.get('status', '').capitalize()
+                local_status = self._local_credential_status(app=self.app, said=cred_said, sad=cred.get("sad", {}))
+
                 # Check if credential is already in local verifier
-                if self.app.vault.verifier.reger.saved.get(keys=(cred_said,)):
-                    logger.debug(f"Credential {cred_said} already saved locally, skipping")
+                if remote_status == local_status:
+                    logger.debug(f"Credential {cred_said} already updated locally, skipping")
                     continue
 
                 # Fetch credential stream
@@ -695,3 +698,14 @@ class ViewLiveMultisigIdentifierDialog(LocksmithDialog):
 
         except Exception as e:
             logger.exception(f"Error catching up issued credentials: {e}")
+
+    @staticmethod
+    def _local_credential_status(app, said: str, sad) -> str | None:
+        """Determine local TEL status ('Issued'/'Revoked') for a credential, or None if unknown locally."""
+        try:
+            regk = sad.get('ri')
+            vc_state = app.rgy.tevers[regk].vcState(said)
+            return "Revoked" if vc_state.et in [coring.Ilks.rev, coring.Ilks.brv] else "Issued"
+        except Exception as e:
+            logger.debug(f"Could not determine local TEL state for {said}: {e}")
+            return None

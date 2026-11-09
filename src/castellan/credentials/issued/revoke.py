@@ -5,22 +5,23 @@ castellan.credentials.issued.revoke module
 Dialog for confirming and revoking an issued credential, and automatically
 syncing the revocation (and any resulting key state change) to the Castellan
 server once the local TEL revocation completes.
+
+For multisig issuers, after confirmation this dialog initiates the revocation
+on the server and opens the ViewCredentialRevocationDialog for signature collection.
 """
 import asyncio
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
-from keri import help
+from keri import help, core, kering
+from keri.core import eventing, coring, serdering
+from keri.db.dbing import dgKey, snKey
+from keri.vdr import eventing as veventing
 from locksmith.core.credentialing import RevokeCredentialDoer
 from locksmith.ui.toolkit.widgets.dialogs import LocksmithResourceDeletionDialog
 from locksmith.ui.vault.identifiers.authenticate import WitnessAuthenticationDialog
 from PySide6.QtWidgets import QLabel
 
-from ...core import remoting
-
-if TYPE_CHECKING:
-    from locksmith.core.apping import LocksmithApplication
-    from locksmith.ui.vault.page import VaultPage
+from ...core import remoting, identifying
 
 logger = help.ogler.getLogger(__name__)
 
@@ -36,11 +37,11 @@ class RevokeIssuedCredentialDialog(LocksmithResourceDeletionDialog):
 
     def __init__(
         self,
-        app: "LocksmithApplication",
+        app,
         schema_name: str,
         said: str,
         on_success: Callable[[str], None] | None = None,
-        parent: "VaultPage | None" = None,
+        parent = None,
     ):
         """Initialize the RevokeIssuedCredentialDialog.
 
@@ -57,8 +58,8 @@ class RevokeIssuedCredentialDialog(LocksmithResourceDeletionDialog):
         self.said = said
         self.on_success = on_success
         self._awaiting_auth = False  # Guard: only handle auth_codes_entered when we initiated auth
-        self.issuer_pre: str | None = None
-        self.issuer_name: str | None = None
+        self.issuer_pre = None
+        self.issuer_name = None
 
         super().__init__(
             parent=parent,
@@ -103,6 +104,13 @@ class RevokeIssuedCredentialDialog(LocksmithResourceDeletionDialog):
             self.issuer_pre = hab.pre
             self.issuer_name = hab.name
 
+            # Check if issuer is a multisig identifier
+            if self._is_multisig_issuer(hab):
+                # Launch multisig revocation flow
+                asyncio.ensure_future(self._launch_multisig_revocation())
+                return
+
+            # Single-sig revocation flow
             if hab.kever.wits:
                 self._awaiting_auth = True
                 auth_dialog = WitnessAuthenticationDialog(
@@ -122,6 +130,125 @@ class RevokeIssuedCredentialDialog(LocksmithResourceDeletionDialog):
             logger.exception(error_msg)
             self._reset_revoke_button()
             self.show_error(error_msg)
+
+    def _is_multisig_issuer(self, hab) -> bool:
+        """Check if issuer is a multisig identifier (group hab)."""
+        return hasattr(hab, 'mhab') and hab.mhab is not None
+
+    async def _launch_multisig_revocation(self):
+        """Initiate multisig revocation on server and show signature dialog."""
+        try:
+            # Fetch the multisig identifier data from server
+            result = await remoting.fetch_multisig_identifier_by_aid(
+                app=self.app,
+                aid=self.issuer_pre,
+            )
+
+            if not result.get('success'):
+                self._reset_revoke_button()
+                self.show_error(f"Could not fetch issuer data: {result.get('error')}")
+                return
+
+            identifier = result.get('identifier', {})
+
+            # Check if there's already a pending revocation on this issuer
+            state = identifying.get_multisig_state(self.app, identifier)
+            if state in ("revocation_created", "revocation_signed"):
+                # Revocation already in progress - show the dialog
+                self._show_revocation_dialog(identifier, state)
+            else:
+                # Need to initiate revocation - call server to create revocation events
+                creder = self.app.vault.rgy.reger.creds.get(keys=(self.said,))
+                registry_pre = creder.regi
+                registry = self.app.vault.rgy.regs[registry_pre] if registry_pre in self.app.vault.rgy.regs else None
+                if not registry:
+                    self._reset_revoke_button()
+                    self.show_error(f"Registry not found for credential {self.said}")
+                    return
+                registry = self.app.vault.rgy.regs[creder.regi]
+                hab = registry.hab
+
+                vcser = self.app.vault.rgy.reger.getTel(snKey(pre=self.said, sn=0))
+                if vcser is None:
+                    raise kering.ValidationError(f"Invalid revoke of {self.said} that has not been issued.")
+                ievt = self.app.vault.rgy.reger.getTvt(dgKey(pre=self.said, dig=vcser))
+                iserder = serdering.SerderKERI(raw=bytes(ievt))  # Serder(raw=bytes(ievt))
+                rev = veventing.revoke(creder.said, registry.regk, dig=iserder.said,)
+
+                # Create registry seal
+                regd = rev.said
+                rseal = {"i": rev.pre, "s": "1", "d": regd}
+
+                # Create and sign IXN to anchor the VCP
+                kever = hab.kever
+                serder = eventing.interact(pre=kever.prefixer.qb64,
+                                           dig=kever.serder.said,
+                                           sn=kever.sner.num + 1,
+                                           data=[rseal])
+
+                ixn_sigers = hab.sign(ser=serder.raw)
+
+                # Build ISS attachment (Counter + seal source couple)
+                seqner = coring.Seqner(sn=kever.sner.num + 1)
+                couple = seqner.qb64b + serder.saidb
+                rev_attachment = (
+                        core.Counter(core.Codens.SealSourceCouples, count=1, gvrsn=kering.Vrsn_1_0).qb64 +
+                        couple.decode('utf-8')
+                )
+
+                result = await remoting.initiate_multisig_revocation(
+                    app=self.app,
+                    rev=rev.sad,
+                    rev_attachment=rev_attachment,
+                    ixn=serder.sad,
+                    ixn_siger=ixn_sigers[0],
+                    multisig_id=identifier.get('id'),
+                    credential_said=self.said,
+                )
+
+                if not result.get('success'):
+                    self._reset_revoke_button()
+                    self.show_error(f"Could not initiate revocation: {result.get('error')}")
+                    return
+
+                # Fetch updated identifier and show dialog
+                result = await remoting.fetch_multisig_identifier_by_aid(app=self.app, aid=self.issuer_pre)
+                if not result.get('success'):
+                    self._reset_revoke_button()
+                    self.show_error(f"Could not fetch updated issuer data: {result.get('error')}")
+                    return
+
+                identifier = result.get('identifier', {})
+                state = identifying.get_multisig_state(self.app, identifier)
+                self._show_revocation_dialog(identifier, state)
+
+        except Exception as e:
+            logger.exception(f"Error launching multisig revocation: {e}")
+            self._reset_revoke_button()
+            self.show_error(f"Failed to initiate revocation: {str(e)}")
+
+    def _show_revocation_dialog(self, identifier: dict, state: str):
+        """Show the ViewCredentialRevocationDialog and close this dialog."""
+        from ...issuers.view_credential_revocation import ViewCredentialRevocationDialog
+
+        identifier['_state'] = state
+        dialog = ViewCredentialRevocationDialog(
+            app=self.app,
+            identifier=identifier,
+            credential_said=self.said,
+            schema_title=self.schema_name,
+            parent=self.parent(),
+        )
+        dialog.closed.connect(self._on_multisig_revocation_closed)
+        dialog.open()
+
+        # Close this confirmation dialog
+        self.close()
+
+    def _on_multisig_revocation_closed(self):
+        """Handle multisig revocation dialog closed."""
+        if self.on_success:
+            self.on_success(self.said)
 
     def _on_auth_codes_entered(self, data: dict):
         """

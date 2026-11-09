@@ -5,7 +5,6 @@ castellan.credentials.issued.edit module
 Dialog for editing dynamic fields of an issued credential on the Castellan server.
 """
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
 import qasync
 from PySide6.QtCore import Qt, Signal
@@ -25,9 +24,6 @@ from locksmith.ui.toolkit.widgets.fields import FloatingLabelComboBox, Locksmith
 
 from ...core import remoting
 
-if TYPE_CHECKING:
-    from locksmith.core.apping import LocksmithApplication
-    from locksmith.ui.vault.page import VaultPage
 
 logger = help.ogler.getLogger(__name__)
 
@@ -74,10 +70,10 @@ class EditIssuedCredentialDialog(LocksmithDialog):
 
     def __init__(
         self,
-        app: "LocksmithApplication",
+        app,
         credential: dict,
         on_success: Callable[[], None] | None = None,
-        parent: "VaultPage | None" = None,
+        parent = None,
     ):
         self.app = app
         self.org = connecting.Organizer(hby=self.app.vault.hby)

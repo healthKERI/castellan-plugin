@@ -5,7 +5,6 @@ castellan.credentials.issued.list module
 Issued credentials list page — shows issued credentials stored on the Castellan server.
 """
 import asyncio
-import json
 from typing import Any, TYPE_CHECKING
 
 import qasync

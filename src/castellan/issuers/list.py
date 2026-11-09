@@ -23,6 +23,7 @@ from .view import ViewIdentifierDialog
 from .view_inception import ViewInceptionMultisigIdentifierDialog
 from .view_live import ViewLiveMultisigIdentifierDialog
 from .view_credential_issuance import ViewCredentialIssuanceDialog
+from .view_credential_revocation import ViewCredentialRevocationDialog
 from .view_registry import ViewRegistryCreationDialog
 from .view_single import ViewSingleIdentifierDialog
 from .view_witness_rotate import ViewWitnessRotateDialog
@@ -167,6 +168,12 @@ class IdentifiersListPage(QWidget):
                 state_color = colors.DANGER
             case "credential_signed":
                 state_display = "Credential, waiting for others"
+                state_color = colors.WARNING_YELLOW
+            case "revocation_created":
+                state_display = "Revocation, pending signature"
+                state_color = colors.DANGER
+            case "revocation_signed":
+                state_display = "Revocation, waiting for others"
                 state_color = colors.WARNING_YELLOW
             case "live_behind":
                 state_display = "Remote Ahead"
@@ -339,6 +346,9 @@ class IdentifiersListPage(QWidget):
                 dialog.closed.connect(self.on_show)
             case "credential_created" | "credential_signed":
                 dialog = ViewCredentialIssuanceDialog(app=self.app, identifier=identifier, row_data=row_data, parent=self)
+                dialog.closed.connect(self.on_show)
+            case "revocation_created" | "revocation_signed":
+                dialog = ViewCredentialRevocationDialog(app=self.app, identifier=identifier, row_data=row_data, parent=self)
                 dialog.closed.connect(self.on_show)
             case "live" | "live_behind":
                 dialog = ViewLiveMultisigIdentifierDialog(app=self.app, identifier=identifier, row_data=row_data, parent=self)
