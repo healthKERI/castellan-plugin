@@ -1,5 +1,5 @@
 # Castellan Plugin
-Locksmith plugin intended for managing Weirwood server credentials
+Locksmith plugin intended for managing Castellan server credentials
 
 ## Setup
 Copy the `src/castellan` dir from this repo into the `src/locksmith/plugins` dir in the locksmith repo.
